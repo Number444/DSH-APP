@@ -8,11 +8,6 @@
 # 说明：第三步 push 不在此脚本内——由主人确定后手动执行（git push origin main）。
 # 退出码：0 = 发布成功且窗口已交付；非 0 = 失败（见错误信息）。
 
-param(
-    [switch]$SmokeFull  # 完整冒烟（含关窗释放验证）——仅离线场景可用：关窗会杀掉
-                        # 被接管的 3080 服务，即当前 Web GUI 会话（工具通道），会中断发布
-)
-
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -54,15 +49,15 @@ function Start-And-Wait-Ready {
     return $false
 }
 
-# ④ 启动产物：就绪验证即交付（不关窗！）
-# 注意：不能做"关窗释放"验证——新实例会接管 3080 上的既有服务（孤儿 dsh web），
+# ④ 启动产物：就绪即交付（不关窗！）
+# 注意：不做"关窗释放"验证——新实例会接管 3080 上的既有服务（孤儿 dsh web），
 # 关窗会把它一并杀掉，而该服务承载当前 Web GUI 会话（工具通道），杀掉即中断发布。
-# 因此默认只验证"启动 + 3080 就绪"，窗口保留交付；完整关窗验证仅离线场景可用（-SmokeFull）。
+# 就绪检查是交付环节的一部分：确认产物能启动、页面能加载（几秒，零额外成本）。
 Write-Host '--- starting artifact and waiting 3080 ready (deliver, no close) ---' -ForegroundColor Cyan
 if (-not (Start-And-Wait-Ready)) {
     throw 'startup failed: 3080 not ready within 30s'
 }
-Write-Host 'app ready, window delivered OK (smoke: HTTP alive + window up)' -ForegroundColor Green
+Write-Host 'app ready, window delivered OK' -ForegroundColor Green
 
 Write-Host '=== publish done. step 3 (push) is decided by the owner: git push origin main ===' -ForegroundColor Cyan
 exit 0
