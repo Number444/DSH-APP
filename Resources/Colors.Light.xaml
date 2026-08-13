@@ -1,0 +1,27 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ========== 浅色配色（GitHub Light 系，与深色 key 一一对应） ========== -->
+    <SolidColorBrush x:Key="BgWindowBrush" Color="#F6F8FA" />
+    <SolidColorBrush x:Key="BgCardBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="CardTranslucentBrush" Color="#F2FFFFFF" />
+    <SolidColorBrush x:Key="OverlayBgBrush" Color="#E6F6F8FA" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#D0D7DE" />
+    <SolidColorBrush x:Key="HoverBgBrush" Color="#E8EDF1" />
+    <SolidColorBrush x:Key="TrackBgBrush" Color="#D0D7DE" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1F2328" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#57606A" />
+    <SolidColorBrush x:Key="TextWeakBrush" Color="#8C959F" />
+    <SolidColorBrush x:Key="AccentBlueBrush" Color="#0969DA" />
+    <SolidColorBrush x:Key="AccentGreenBrush" Color="#1A7F37" />
+    <SolidColorBrush x:Key="AccentRedBrush" Color="#CF222E" />
+    <SolidColorBrush x:Key="AccentOrangeBrush" Color="#BC4C00" />
+    <SolidColorBrush x:Key="ButtonGreenBrush" Color="#1F883D" />
+
+    <!-- 滚动条（CustomScrollBar 四档，浅色下用深色系 Thumb） -->
+    <Color x:Key="ScrollThumbColor">#33000000</Color>
+    <Color x:Key="ScrollThumbHoverColor">#CC000000</Color>
+    <Color x:Key="ScrollBarHoverColor">#55000000</Color>
+    <Color x:Key="ScrollDragColor">#CC0969DA</Color>
+
+</ResourceDictionary>

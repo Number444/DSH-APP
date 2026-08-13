@@ -2,6 +2,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
+using dsh_app.Helpers;
 using dsh_app.Server;
 
 namespace dsh_app;
@@ -37,6 +38,9 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        // 主题初始化（读设置 → 应用配色 → 订阅系统主题变化），须先于主窗口创建
+        ThemeManager.Initialize();
 
         DispatcherUnhandledException += (_, args) =>
         {

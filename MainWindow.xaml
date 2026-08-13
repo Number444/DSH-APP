@@ -4,12 +4,13 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        xmlns:helpers="clr-namespace:dsh_app.Helpers"
         mc:Ignorable="d"
         Title="DeepSeek Harness"
         Width="1200" Height="800"
         MinWidth="960" MinHeight="640"
         WindowStartupLocation="CenterScreen"
-        Background="#0D1117"
+        Background="{DynamicResource BgWindowBrush}"
         Icon="{x:Null}"
         WindowStyle="None"
         UseLayoutRounding="True"
@@ -18,120 +19,9 @@
         <WindowChrome CaptionHeight="36"
                       CornerRadius="0"
                       GlassFrameThickness="0"
-                      ResizeBorderThickness="6"
+                      ResizeBorderThickness="5"
                       UseAeroCaptionButtons="False" />
     </WindowChrome.WindowChrome>
-    <Window.Resources>
-        <Style x:Key="RoundedButton" TargetType="Button">
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.85" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.5" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- 顶栏工具按钮：纯文字，圆角 hover 深色底 -->
-        <Style x:Key="IconButton" TargetType="Button">
-            <Setter Property="Height" Value="26" />
-            <Setter Property="Margin" Value="2,0" />
-            <Setter Property="Padding" Value="10,0" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="#E6EDF3" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#21262D" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="bd" Property="Opacity" Value="0.5" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- 顶栏系统按钮：46x36 标准尺寸，hover 深色底 -->
-        <Style x:Key="SysButton" TargetType="Button">
-            <Setter Property="Width" Value="46" />
-            <Setter Property="Height" Value="36" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="#E6EDF3" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#21262D" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- 关闭按钮：hover 红色（窗口标准行为） -->
-        <Style x:Key="SysButtonClose" TargetType="Button" BasedOn="{StaticResource SysButton}">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd"
-                                Background="{TemplateBinding Background}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#F85149" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -142,7 +32,7 @@
         <!-- ==================== 顶栏（WindowChrome 自绘标题栏） ==================== -->
         <Grid x:Name="TitleBar"
               Grid.Row="0"
-              Background="#0D1117">
+              Background="{DynamicResource BgWindowBrush}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
@@ -154,8 +44,7 @@
                        Margin="16,0,0,0"
                        FontSize="13"
                        FontWeight="SemiBold"
-                       LineHeight="20"
-                       Foreground="#E6EDF3"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
                        VerticalAlignment="Center" />
 
             <!-- 工具按钮 -->
@@ -164,21 +53,48 @@
                         Margin="12,0,0,0">
                 <Button x:Name="TitleBtnRefresh"
                         Content="刷新"
-                        Style="{StaticResource IconButton}"
+                        Style="{DynamicResource IconButton}"
                         Click="TitleBtnRefresh_Click" />
                 <Button x:Name="TitleBtnBrowser"
                         Content="浏览器"
-                        Style="{StaticResource IconButton}"
+                        Style="{DynamicResource IconButton}"
                         Click="TitleBtnBrowser_Click" />
                 <Button x:Name="TitleBtnLog"
                         Content="日志"
-                        Style="{StaticResource IconButton}"
+                        Style="{DynamicResource IconButton}"
                         Click="TitleBtnLog_Click" />
                 <Button x:Name="TitleBtnRestart"
                         Content="重启服务"
-                        Style="{StaticResource IconButton}"
+                        Style="{DynamicResource IconButton}"
                         Click="TitleBtnRestart_Click" />
+                <Button x:Name="TitleBtnMenu"
+                        Content="菜单"
+                        Style="{DynamicResource IconButton}"
+                        Click="TitleBtnMenu_Click" />
             </StackPanel>
+
+            <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响） -->
+            <Popup x:Name="MenuPopup"
+                   Placement="Bottom"
+                   PlacementTarget="{Binding ElementName=TitleBtnMenu}"
+                   AllowsTransparency="True"
+                   StaysOpen="False">
+                <Border Width="180"
+                        Padding="4"
+                        Background="{DynamicResource BgCardBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                    <StackPanel>
+                        <Button Content="关于"
+                                Style="{DynamicResource MenuItemButton}"
+                                Click="MenuAbout_Click" />
+                        <Button Content="设置"
+                                Style="{DynamicResource MenuItemButton}"
+                                Click="MenuSettings_Click" />
+                    </StackPanel>
+                </Border>
+            </Popup>
 
             <!-- 系统按钮 -->
             <StackPanel Grid.Column="3"
@@ -186,23 +102,27 @@
                 <Button x:Name="TitleBtnMin"
                         Content="─"
                         ToolTip="最小化"
-                        Style="{StaticResource SysButton}"
+                        Style="{DynamicResource SysButton}"
                         Click="TitleBtnMin_Click" />
                 <Button x:Name="TitleBtnMax"
                         Content="□"
                         ToolTip="最大化"
-                        Style="{StaticResource SysButton}"
+                        Style="{DynamicResource SysButton}"
                         Click="TitleBtnMax_Click" />
                 <Button x:Name="TitleBtnClose"
                         Content="✕"
                         ToolTip="关闭"
-                        Style="{StaticResource SysButtonClose}"
+                        Style="{DynamicResource SysButtonClose}"
                         Click="TitleBtnClose_Click" />
             </StackPanel>
         </Grid>
 
-        <!-- ==================== 内容区 ==================== -->
-        <Grid Grid.Row="1">
+        <!-- ==================== 内容区 ====================
+             四周留出 WindowChrome 的 resize 热区（普通状态 5px）；
+             WebView2 的 HWND 会拦截热区命中测试，必须让出边缘才能拖拽调窗。 -->
+        <Grid x:Name="ContentRoot"
+              Grid.Row="1"
+              Margin="5,0,5,5">
             <!-- Harness Web UI（初始隐藏：避免 HWND 子窗口盖住启动覆盖层，页面加载完成后再显示） -->
             <wv2:WebView2 x:Name="WebView" Visibility="Collapsed" />
 
@@ -211,7 +131,7 @@
                  左下 = 启动进度卡片（低调，不喧宾夺主） -->
             <Grid x:Name="Overlay"
                   Panel.ZIndex="10"
-                  Background="#E60D1117"
+                  Background="{DynamicResource OverlayBgBrush}"
                   Visibility="Collapsed">
 
                 <!-- 中央品牌区 -->
@@ -221,14 +141,13 @@
                     <TextBlock Text="DeepSeek Harness"
                                FontSize="40"
                                FontWeight="SemiBold"
-                               Foreground="#E6EDF3"
+                               Foreground="{DynamicResource TextPrimaryBrush}"
                                HorizontalAlignment="Center" />
                     <TextBlock x:Name="CenterSubtitle"
                                Margin="0,12,0,0"
                                Text="正在启动…"
                                FontSize="13"
-                               LineHeight="20"
-                               Foreground="#9DA7B3"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
                                HorizontalAlignment="Center" />
                 </StackPanel>
 
@@ -243,16 +162,14 @@
                         <TextBlock x:Name="OverlayGlyph"
                                    Text="⚠"
                                    FontSize="20"
-                                   LineHeight="28"
-                                   Foreground="Orange"
+                                   Foreground="{DynamicResource AccentOrangeBrush}"
                                    VerticalAlignment="Center" />
                         <TextBlock x:Name="OverlayTitle"
                                    Margin="12,0,0,0"
                                    Text="启动失败"
                                    FontSize="18"
                                    FontWeight="SemiBold"
-                                   LineHeight="28"
-                                   Foreground="#E6EDF3"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
                                    VerticalAlignment="Center" />
                     </StackPanel>
                     <TextBlock x:Name="OverlayErrorDetail"
@@ -260,7 +177,7 @@
                                TextWrapping="Wrap"
                                LineHeight="22"
                                FontSize="13"
-                               Foreground="#9DA7B3"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
                                TextAlignment="Center" />
                     <StackPanel x:Name="OverlayActions"
                                 Orientation="Horizontal"
@@ -271,8 +188,8 @@
                                 Content="重试"
                                 Padding="24,9"
                                 Click="RetryButton_Click"
-                                Style="{StaticResource RoundedButton}"
-                                Background="#238636"
+                                Style="{DynamicResource RoundedButton}"
+                                Background="{DynamicResource ButtonGreenBrush}"
                                 Foreground="White"
                                 BorderThickness="0" />
                         <Button x:Name="LogButton"
@@ -280,10 +197,10 @@
                                 Margin="12,0,0,0"
                                 Padding="24,9"
                                 Click="LogButton_Click"
-                                Style="{StaticResource RoundedButton}"
-                                Background="#21262D"
-                                Foreground="#E6EDF3"
-                                BorderBrush="#30363D"
+                                Style="{DynamicResource RoundedButton}"
+                                Background="{DynamicResource BgCardBrush}"
+                                Foreground="{DynamicResource TextPrimaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1" />
                     </StackPanel>
                 </StackPanel>
@@ -294,16 +211,15 @@
                         Padding="20,16"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Bottom"
-                        Background="#E6161B22"
-                        BorderBrush="#30363D"
+                        Background="{DynamicResource CardTranslucentBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
                         BorderThickness="1"
                         CornerRadius="10">
                     <StackPanel>
                         <TextBlock Text="启动进度"
                                    FontSize="13"
                                    FontWeight="SemiBold"
-                                   LineHeight="20"
-                                   Foreground="#E6EDF3"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
                                    Margin="0,0,0,8" />
                         <ItemsControl x:Name="StepList">
                             <ItemsControl.ItemTemplate>
@@ -316,20 +232,17 @@
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding Icon}"
                                                    FontSize="13"
-                                                   LineHeight="20"
                                                    Foreground="{Binding IconBrush}" />
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding Name}"
                                                    Margin="10,0,0,0"
                                                    FontSize="13"
-                                                   LineHeight="20"
-                                                   Foreground="#E6EDF3" />
+                                                   Foreground="{DynamicResource TextPrimaryBrush}" />
                                         <TextBlock Grid.Column="2"
                                                    Text="{Binding Detail}"
                                                    Margin="12,0,0,0"
                                                    FontSize="12"
-                                                   LineHeight="20"
-                                                   Foreground="#9DA7B3"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"
                                                    TextTrimming="CharacterEllipsis" />
                                     </Grid>
                                 </DataTemplate>
@@ -340,26 +253,33 @@
                                      Margin="0,10,0,0"
                                      Height="3"
                                      IsIndeterminate="True"
-                                     Foreground="#58A6FF"
-                                     Background="#21262D" />
+                                     Foreground="{DynamicResource AccentBlueBrush}"
+                                     Background="{DynamicResource TrackBgBrush}" />
 
-                        <!-- 实时日志（压缩滚动区） -->
-                        <ScrollViewer x:Name="OverlayLogScroller"
-                                      MaxHeight="88"
-                                      Margin="0,10,0,0"
-                                      VerticalScrollBarVisibility="Auto">
-                            <TextBlock x:Name="OverlayDetail"
-                                       TextWrapping="Wrap"
-                                       LineHeight="16"
-                                       FontSize="11"
-                                       Foreground="#9DA7B3" />
-                        </ScrollViewer>
+                        <!-- 实时日志（Toolbox 风格自定义滚动条） -->
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="16" />
+                            </Grid.ColumnDefinitions>
+                            <ScrollViewer x:Name="OverlayLogScroller"
+                                          MaxHeight="88"
+                                          VerticalScrollBarVisibility="Hidden">
+                                <TextBlock x:Name="OverlayDetail"
+                                           TextWrapping="Wrap"
+                                           LineHeight="16"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </ScrollViewer>
+                            <helpers:CustomScrollBar Grid.Column="1"
+                                                     Width="16"
+                                                     TargetScrollViewer="{Binding ElementName=OverlayLogScroller}" />
+                        </Grid>
 
                         <TextBlock Text="dsh-app v1.0 · DeepSeek Harness 桌面壳"
                                    Margin="0,8,0,0"
                                    FontSize="11"
-                                   LineHeight="16"
-                                   Foreground="#6E7681" />
+                                   Foreground="{DynamicResource TextWeakBrush}" />
                     </StackPanel>
                 </Border>
             </Grid>

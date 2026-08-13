@@ -44,8 +44,9 @@
 | 系统按钮 | 46×36 标准尺寸；最小化 `─` / 最大化 `□` / 关闭 `✕`；**关闭 hover 必须红 `#F85149`** |
 | 布局 | 左：标题 → 工具按钮；右：系统按钮；顶栏背景 `#0D1117` 与窗口同色 |
 | 拖动 | 顶栏空白区由 CaptionHeight 提供拖动与双击最大化，禁止手动 `DragMove()` 破坏该行为 |
+| **resize 热区** | `ResizeBorderThickness=5`；**内容区四周必须留出热区边距**（普通状态 `Margin 5,0,5,5`，最大化切 0）——WebView2 HWND 会拦截客户区边缘命中测试，不留边则侧/底无法调窗（airspace 的另一表现） |
 
-**工具按钮固定清单（4 个，勿删减，纯文字）**：刷新 / 浏览器 / 日志 / 重启服务。
+**工具按钮固定清单（5 个，勿删减，纯文字）**：刷新 / 浏览器 / 日志 / 重启服务 / 菜单（下拉：关于、设置）。
 
 **规则 R7（按钮区互斥）**：顶栏按钮在错误态也必须可用（日志、刷新、重启都是排查入口）——因此 Overlay 必须在内容区（Row 1），**不得覆盖顶栏**。
 
@@ -126,9 +127,11 @@
 
 **规则 R5（对齐铁律）**：
 1. **同一行的所有 TextBlock 必须设置相同 `LineHeight`**——字号可以不同（如详情 12/步骤名 13），行高必须统一（20px），否则基线错位。
-2. 图标（○✓⋯✗）用字符实现时，字号与所在行文本一致，不再单独加大。
-3. 左对齐为主：步骤行 Icon（18px 固定列）→ 名称 → 详情（`TextTrimming=CharacterEllipsis`）三列左对齐；中央品牌/错误区允许居中。
-4. 日志区、版本号用 `LineHeight` 固定行高，避免多行文本参差。
+2. **固定高度控件（按钮等）必须显式 `VerticalAlignment="Center"`**——Horizontal StackPanel 内子元素默认 Stretch，显式 Height 后 Stretch 失效会**贴顶对齐**，这是顶栏按钮错位的经典陷阱。
+3. **单行垂直居中文本不要设 LineHeight**：设了 LineHeight 的 TextBlock 内 glyph 靠行框顶部渲染，视觉中心偏上约 (LineHeight-字号)/2；不设时行高=字号，控件居中即文字居中。顶栏标题/按钮文字一律走"不设 LineHeight + 控件居中"。
+4. 图标（○✓⋯✗）用字符实现时，字号与所在行文本一致，不再单独加大。
+5. 左对齐为主：步骤行 Icon（18px 固定列）→ 名称 → 详情（`TextTrimming=CharacterEllipsis`）三列左对齐；中央品牌/错误区允许居中。
+6. 日志区、版本号用 `LineHeight` 固定行高，避免多行文本参差。
 
 ### 4.3 间距与圆角
 
@@ -136,7 +139,22 @@
 - 圆角：主卡片 12、进度卡片 10、按钮 6。
 - 进度卡片 Margin `20,0,0,20`（左、下贴边）；Padding `20,16`。
 
-### 4.4 WebView2 与过渡
+### 4.4 主题系统
+
+**规则 R8（主题铁律）**：主题由三层构成，任何 UI 改动必须遵守：
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| 配色字典 | `Resources/Colors.Dark.xaml` / `Colors.Light.xaml` | 同名 key 的双套颜色（画刷 + 滚动条 Color），**新增颜色必须两套同 key 都加** |
+| 样式字典 | `Resources/Theme.xaml` | 按钮/滚动条样式，颜色一律 `DynamicResource` 引用配色字典 |
+| 管理器 | `Helpers/ThemeManager.cs` | `AppTheme.Dark/Light/System` 三模式；切换时替换 App 合并字典 `[0]`；持久化 `settings.json`；`System` 模式读系统注册表（AppsUseLightTheme）+ `SystemEvents.UserPreferenceChanged` 监听 |
+
+- **所有 UI 颜色必须 `DynamicResource`**（`StaticResource` 只解析一次，无法随主题切换）。
+- 主窗口/设置窗/关于窗的 DWM 标题栏深色随 `ThemeManager.IsDarkNow` 联动。
+- 设置窗口（`Views/SettingsWindow.xaml`）：深色/浅色单选 + 跟随系统开关（开启后禁用单选）；变更即生效即保存。
+- 关于窗口（`Views/AboutWindow.xaml`）：产品信息展示，无逻辑。
+
+### 4.5 WebView2 与过渡
 
 - **WebView2 `DefaultBackgroundColor` 固定 `#0D1117`**（与窗口同色，消除导航/刷新白闪）。
 - **`Profile.PreferredColorScheme = Dark`**：页面滚动条/表单控件走深色（仅偏好提示，不改页面内容）。
@@ -163,10 +181,11 @@
 
 ---
 
-## 6. 代码约定
+## 6. 资源与代码约定
 
-1. 覆盖层元素命名：`Overlay` 前缀（`OverlayProgress` / `OverlayDetail` / `OverlayActions`）或分区名（`CenterBrand` / `CenterError`）。
-2. 颜色值内联写死（本项目规模小，暂不引入资源字典；规模扩大后迁移到 `Resources`）。
-3. 后台事件 → UI 一律 `Dispatcher.Invoke`，禁止直接触碰控件。
-4. 日志双通道：`AppendLog`（UI 展示 + app.log 落盘）由 `_server.Log` 驱动，新增诊断信息走同一通道。
-5. 新增 UI 区域必须先过本规范：**R1（airspace）→ R2（主次）→ R3（首帧反馈）→ R4（线程）→ R5（对齐）**。
+1. **颜色在 `Resources/Colors.Dark.xaml` / `Colors.Light.xaml`（双套同名 key），样式在 `Resources/Theme.xaml`**（App.xaml 合并：`[0]` 配色、`[1]` 样式）。**新增颜色两套同 key 都加；样式一律 `DynamicResource` 引用**；禁止 XAML 内联写死（C# 代码内颜色常量除外，如 `StepRow` 的状态色）。
+2. **滚动条统一用 `helpers:CustomScrollBar`**（自 `Toolbox` 移植，`Helpers/CustomScrollBar.cs`）：ScrollViewer 设 `VerticalScrollBarVisibility="Hidden"`，与 CustomScrollBar 并列在 Grid 中（宽 16），`TargetScrollViewer` 绑定——四档过渡（拖拽 > 悬停 Thumb > 悬停 Bar > 常态）由控件内部驱动，禁止叠系统滚动条。
+3. 覆盖层元素命名：`Overlay` 前缀（`OverlayProgress` / `OverlayDetail` / `OverlayActions`）或分区名（`CenterBrand` / `CenterError`）。
+4. 后台事件 → UI 一律 `Dispatcher.Invoke`，禁止直接触碰控件。
+5. 日志双通道：`AppendLog`（UI 展示 + app.log 落盘）由 `_server.Log` 驱动，新增诊断信息走同一通道。
+6. 新增 UI 区域必须先过本规范：**R1（airspace）→ R2（主次）→ R3（首帧反馈）→ R4（线程）→ R5（对齐）**。

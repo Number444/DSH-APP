@@ -3,6 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:dsh_app">
     <Application.Resources>
-         
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- [0] 配色字典：ThemeManager 切换主题时替换（Colors.Dark / Colors.Light） -->
+                <ResourceDictionary Source="Resources/Colors.Dark.xaml" />
+                <!-- [1] 样式字典：颜色全部 DynamicResource 引用 [0] -->
+                <ResourceDictionary Source="Resources/Theme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

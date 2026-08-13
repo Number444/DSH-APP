@@ -12,6 +12,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using dsh_app.Helpers;
 using dsh_app.Server;
 using Microsoft.Web.WebView2.Core;
 
@@ -356,6 +357,22 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---------------- 菜单（关于 / 设置） ----------------
+
+    private void TitleBtnMenu_Click(object sender, RoutedEventArgs e) => MenuPopup.IsOpen = true;
+
+    private void MenuAbout_Click(object sender, RoutedEventArgs e)
+    {
+        MenuPopup.IsOpen = false;
+        new Views.AboutWindow { Owner = this }.ShowDialog();
+    }
+
+    private void MenuSettings_Click(object sender, RoutedEventArgs e)
+    {
+        MenuPopup.IsOpen = false;
+        new Views.SettingsWindow { Owner = this }.ShowDialog();
+    }
+
     private void TitleBtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
     private void TitleBtnMax_Click(object sender, RoutedEventArgs e)
@@ -368,6 +385,9 @@ public partial class MainWindow : Window
     {
         TitleBtnMax.Content = WindowState == WindowState.Maximized ? "❐" : "□";
         TitleBtnMax.ToolTip = WindowState == WindowState.Maximized ? "还原" : "最大化";
+        // 最大化时无需 resize 热区（贴边），普通状态四周留 5px 让出热区
+        var m = WindowState == WindowState.Maximized ? 0.0 : 5.0;
+        ContentRoot.Margin = new Thickness(m, 0, m, m);
     }
 
     private void TitleBtnClose_Click(object sender, RoutedEventArgs e) => Close();
@@ -446,15 +466,22 @@ public partial class MainWindow : Window
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
 
-        int dark = 1;
-        _ = DwmSetWindowAttribute(hwnd, DWM_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+        // 深色跟随主题；自绘标题栏（WindowStyle=None）下恢复 Win11 原生圆角
+        ApplyDwmTheme();
+        ThemeManager.ThemeChanged += _ => ApplyDwmTheme();
 
-        // 自绘标题栏（WindowStyle=None）下恢复 Win11 原生圆角；
-        // 最大化时 DWM 自动切直角，符合 Windows 惯例。
         int corner = DWMWCP_ROUND;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
 
         WindowPlacementStore.Restore(this);
+    }
+
+    private void ApplyDwmTheme()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        int dark = ThemeManager.IsDarkNow ? 1 : 0;
+        _ = DwmSetWindowAttribute(hwnd, DWM_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
     }
 
     [DllImport("dwmapi.dll")]
