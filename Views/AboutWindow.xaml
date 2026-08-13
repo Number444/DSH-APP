@@ -19,7 +19,7 @@
                            FontSize="18"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource TextPrimaryBrush}" />
-                <TextBlock Text="dsh-app v1.0.0"
+                <TextBlock Text="dsh-app v1.1.0"
                            Margin="0,4,0,0"
                            FontSize="12"
                            Foreground="{DynamicResource TextSecondaryBrush}" />

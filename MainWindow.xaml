@@ -317,7 +317,7 @@
                                                      TargetScrollViewer="{Binding ElementName=OverlayLogScroller}" />
                         </Grid>
 
-                        <TextBlock Text="dsh-app v1.0 · DeepSeek Harness 桌面壳"
+                        <TextBlock Text="dsh-app v1.1 · DeepSeek Harness 桌面壳"
                                    Margin="0,8,0,0"
                                    FontSize="11"
                                    Foreground="{DynamicResource TextWeakBrush}" />
