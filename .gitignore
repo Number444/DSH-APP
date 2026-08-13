@@ -1,0 +1,15 @@
+# .NET 构建产物
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# 图标中间产物(仅保留源 svg 与成品 ico)
+Assets/icon256.svg
+Assets/icon256.png
+
+# 本地日志
+*.log
