@@ -174,7 +174,7 @@
 | 服务中途停止（自家进程崩溃） | `ServerController.ServerDied` → 先 `WebView.Visibility = Collapsed`（R1：WPF 覆盖层盖不住 HWND）→ 错误区"服务连接已断开" + 重试 |
 | 服务中途停止（接管的外部 dsh） | 页面就绪后 30s 心跳（连续 2 次失败判定），同上错误卡；重试/重启/关窗停止心跳 |
 | 渲染进程崩溃 | `ProcessFailed(RenderProcessExited/Unresponsive)` → 自动 `Reload()` 一次，再崩溃 → 错误区 + 重试 |
-| 重试 / 顶栏重启服务 | `ShowLoading()`（重置步骤）→ `Shutdown()` → 重新 `EnsureServerAsync()` → `Navigate` |
+| 重试 / 顶栏重启服务 | **先 `WebView.Visibility = Collapsed`（R1：覆盖层盖不住 HWND）** → `ShowLoading()`（重置步骤）→ `Shutdown()` → 重新 `EnsureServerAsync()` → `Navigate` |
 | 顶栏刷新 | `CoreWebView2.Reload()`（页面卡死时用） |
 | 顶栏浏览器打开 | `Process.Start(url, UseShellExecute=true)`——用户原有的浏览器工作流后路 |
 | 关窗 | `ServerController.Shutdown()`：清理**自己拉起的**进程；**接管的外部服务经身份验证（进程命令行含 dsh/bin.js 特征）确认是 dsh 后一并停止**（防"关不掉"残留），非 dsh 程序绝不误杀 |

@@ -71,6 +71,18 @@
                         Content="菜单"
                         Style="{DynamicResource IconButton}"
                         Click="TitleBtnMenu_Click" />
+                <!-- 余额显示（菜单右侧，非工具按钮；点击手动刷新；仅在设置开启时可见） -->
+                <TextBlock x:Name="TitleBalance"
+                           Margin="8,0,4,0"
+                           MaxWidth="72"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextWeakBrush}"
+                           VerticalAlignment="Center"
+                           Cursor="Hand"
+                           TextTrimming="CharacterEllipsis"
+                           WindowChrome.IsHitTestVisibleInChrome="True"
+                           MouseLeftButtonUp="TitleBalance_Click"
+                           Visibility="Collapsed" />
             </StackPanel>
 
             <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响） -->
@@ -79,7 +91,7 @@
                    PlacementTarget="{Binding ElementName=TitleBtnMenu}"
                    AllowsTransparency="True"
                    StaysOpen="False">
-                <Border Width="180"
+                <Border Width="220"
                         Padding="4"
                         Background="{DynamicResource BgCardBrush}"
                         BorderBrush="{DynamicResource BorderBrush}"
@@ -92,6 +104,10 @@
                         <Button Content="设置"
                                 Style="{DynamicResource MenuItemButton}"
                                 Click="MenuSettings_Click" />
+                        <Button x:Name="MenuCheckUpdate"
+                                Content="检查更新"
+                                Style="{DynamicResource MenuItemButton}"
+                                Click="MenuCheckUpdate_Click" />
                     </StackPanel>
                 </Border>
             </Popup>

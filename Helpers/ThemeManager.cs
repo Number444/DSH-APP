@@ -1,6 +1,4 @@
 using System;
-using System.IO;
-using System.Text.Json;
 using System.Windows;
 using Microsoft.Win32;
 
@@ -21,10 +19,6 @@ public enum AppTheme
 /// </summary>
 public static class ThemeManager
 {
-    private static readonly string SettingsPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "dsh-app", "settings.json");
-
     /// <summary>当前设置的主题模式。</summary>
     public static AppTheme Current { get; private set; } = AppTheme.System;
 
@@ -46,7 +40,8 @@ public static class ThemeManager
     public static void SetTheme(AppTheme theme)
     {
         Current = theme;
-        Save();
+        AppSettings.Current.Theme = theme;
+        AppSettings.Current.Save();
         ApplyNow();
     }
 
@@ -90,37 +85,5 @@ public static class ThemeManager
         ThemeChanged?.Invoke(IsDarkNow);
     }
 
-    private static AppTheme Load()
-    {
-        try
-        {
-            if (File.Exists(SettingsPath))
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(SettingsPath))?.Theme
-                       ?? AppTheme.System;
-        }
-        catch
-        {
-            // 损坏配置按默认处理
-        }
-        return AppTheme.System;
-    }
-
-    private static void Save()
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(SettingsPath)!;
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(new Settings { Theme = Current }));
-        }
-        catch
-        {
-            // 保存失败不影响运行
-        }
-    }
-
-    private sealed class Settings
-    {
-        public AppTheme Theme { get; set; } = AppTheme.System;
-    }
+    private static AppTheme Load() => AppSettings.Current.Theme;
 }

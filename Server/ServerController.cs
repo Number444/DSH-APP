@@ -50,6 +50,12 @@ public sealed class ServerController : IDisposable
     /// <summary>服务器是否由本应用拉起(决定退出时是否清理)。</summary>
     public bool IsSelfStarted => _selfStarted;
 
+    /// <summary>
+    /// 当前端口服务是否由本应用管理：自家拉起，或接管且已通过 dsh 身份验证。
+    /// Harness 更新等需要"能停服"的操作以此为前置条件（非 dsh 占用端口时拒绝）。
+    /// </summary>
+    public bool IsManaged => _selfStarted || _adoptedIsDsh;
+
     /// <summary>运行日志回调，供 UI 状态区与日志文件使用。</summary>
     public event Action<string>? Log;
 
@@ -293,7 +299,7 @@ public sealed class ServerController : IDisposable
     /// 定位 node.exe：依次扫描进程 PATH、注册表 PATH(Machine+User)、常见安装位置。
     /// 注册表 PATH 扫描可绕过父进程环境过期的问题（如 explorer 未刷新环境变量）。
     /// </summary>
-    private static string? ResolveNodeExe()
+    internal static string? ResolveNodeExe()
     {
         foreach (var dir in GetPathDirs(Environment.GetEnvironmentVariable("PATH")))
         {
@@ -326,26 +332,32 @@ public sealed class ServerController : IDisposable
     /// </summary>
     private static string? ResolveDshBinJs()
     {
-        string? npmDir = null;
-        foreach (var dir in GetPathDirs(Environment.GetEnvironmentVariable("PATH")))
-        {
-            if (File.Exists(Path.Combine(dir, "dsh.cmd"))) { npmDir = dir; break; }
-        }
-        if (npmDir is null)
-        {
-            // 常见 npm 全局目录兜底
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            npmDir = new[]
-            {
-                Path.Combine(appData, "npm"),
-                Path.Combine(programFiles, "nodejs"),
-            }.FirstOrDefault(dir => File.Exists(Path.Combine(dir, "dsh.cmd")));
-        }
+        var npmDir = ResolveNpmDir();
         if (npmDir is null) return null;
 
         var bin = Path.Combine(npmDir, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
         return File.Exists(bin) ? bin : null;
+    }
+
+    /// <summary>
+    /// 定位 npm 全局 bin 目录（dsh.cmd 宿主目录）：进程 PATH → 常见 npm 全局目录兜底。
+    /// 供启动链路与 Harness 更新（npm view / install）共用。
+    /// </summary>
+    internal static string? ResolveNpmDir()
+    {
+        foreach (var dir in GetPathDirs(Environment.GetEnvironmentVariable("PATH")))
+        {
+            if (File.Exists(Path.Combine(dir, "dsh.cmd"))) return dir;
+        }
+
+        // 常见 npm 全局目录兜底
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        return new[]
+        {
+            Path.Combine(appData, "npm"),
+            Path.Combine(programFiles, "nodejs"),
+        }.FirstOrDefault(dir => File.Exists(Path.Combine(dir, "dsh.cmd")));
     }
 
     /// <summary>把 PATH 字符串按 ';' 拆成清理后的目录列表（跳过空项与非法段）。</summary>

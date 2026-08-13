@@ -15,7 +15,9 @@
 - **断连检测**:自家进程崩溃(`ServerDied`)与接管服务心跳(30s×2 次)双通道
 - **接管身份验证**:外部 dsh 经 PID + 命令行双重验证后才接管清理,非 dsh 程序绝不误杀
 - **主题系统**:深色 / 浅色 / 跟随系统(读系统主题 + 实时监听),全 DynamicResource 动态切换
-- **菜单下拉**:关于 / 设置(胶囊分段 + 滑块开关,套用 Toolbox 设计)
+- **Harness 更新**:顶栏菜单"检查更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);用户确认后停服 → `npm install -g` → 自动重启,全程日志可见
+- **顶栏余额显示**:菜单右侧常驻 DeepSeek 开放平台剩余资金(¥),60s 自动刷新 + 点击手动刷新;API Key 经用户确认授权后自动读取 dsh 凭据,或设置页手动填写(DPAPI 加密)
+- **菜单下拉**:关于 / 设置 / 检查更新(胶囊分段 + 滑块开关,套用 Toolbox 设计)
 - **窗口记忆**:位置/尺寸/最大化状态持久化(防外接屏拔除后窗口丢失)
 - **自定义滚动条**:Toolbox 同款四档过渡(拖拽 > 悬停 Thumb > 悬停轨道 > 常态)
 
@@ -62,6 +64,8 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — 架构、调用链路、设计决策
 - [docs/UI-GUIDELINES.md](docs/UI-GUIDELINES.md) — 窗口架构与 UI 规范(R1~R8 铁律)
+- [docs/UPDATE-MECHANISM.md](docs/UPDATE-MECHANISM.md) — Harness 更新机制设计（待实现）
+- [docs/BALANCE-DISPLAY.md](docs/BALANCE-DISPLAY.md) — 顶栏余额显示设计（待实现）
 
 ## 回退
 

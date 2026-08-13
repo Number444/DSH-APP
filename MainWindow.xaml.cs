@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -27,12 +28,19 @@ public partial class MainWindow : Window
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
 
     private readonly ServerController _server = new();
+    private readonly HarnessUpdater _updater = new();
+    private readonly BalanceMonitor _balance = new();
     private readonly StringBuilder _logTail = new();
     private readonly string _logFilePath;
     private readonly ObservableCollection<StepRow> _steps = new();
     private readonly DispatcherTimer _heartbeat;
     private int _heartbeatMisses;
     private bool _rendererReloadTried;
+    private bool _autoCheckRan;
+    private bool _checking;
+    private bool _updating;
+    private bool _balanceRunning;
+    private bool _abortUpdateConfirmed;
 
     public MainWindow()
     {
@@ -47,6 +55,12 @@ public partial class MainWindow : Window
         _server.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
         _server.StepChanged += (step, status, detail) => Dispatcher.Invoke(() => UpdateStep(step, status, detail));
         _server.ServerDied += () => Dispatcher.Invoke(OnServerDied);
+
+        // Harness 更新器：日志走同一通道
+        _updater.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
+
+        // 余额监控：回调经 Dispatcher 上 UI（R4 线程铁律）
+        _balance.BalanceChanged += text => Dispatcher.Invoke(() => OnBalanceChanged(text));
 
         // 接管模式（外部 dsh）心跳：进程不归属本壳，只能靠 HTTP 探测感知死亡
         _heartbeat = new DispatcherTimer { Interval = HeartbeatInterval };
@@ -131,6 +145,8 @@ public partial class MainWindow : Window
             HideOverlay();
             _rendererReloadTried = false;
             StartHeartbeatIfAdopted();
+            StartBalanceIfEnabled();
+            MaybeAutoCheckUpdate();
         }
         else
         {
@@ -146,7 +162,11 @@ public partial class MainWindow : Window
         {
             case CoreWebView2ProcessFailedKind.BrowserProcessExited:
                 Dispatcher.Invoke(() =>
-                    ShowError("页面进程已退出", "浏览器内核异常退出，服务器可能仍在运行。", allowRetry: true));
+                {
+                    // R1：先收起 WebView2，覆盖层才可见
+                    WebView.Visibility = Visibility.Collapsed;
+                    ShowError("页面进程已退出", "浏览器内核异常退出，服务器可能仍在运行。", allowRetry: true);
+                });
                 break;
 
             case CoreWebView2ProcessFailedKind.RenderProcessExited:
@@ -288,6 +308,8 @@ public partial class MainWindow : Window
         RetryButton.IsEnabled = false;
         try
         {
+            // R1：先收起 WebView2，覆盖层才可见（审查加固：与更新流程同一时序）
+            WebView.Visibility = Visibility.Collapsed;
             ShowLoading();
             _server.Shutdown(); // 若此前拉起过，先清理干净
             var ok = await _server.EnsureServerAsync();
@@ -314,6 +336,8 @@ public partial class MainWindow : Window
 
     private void TitleBtnRefresh_Click(object sender, RoutedEventArgs e)
     {
+        // 更新中禁止刷新：会触发页面重载与错误覆盖层，与更新流程并发 EnsureServerAsync（审查加固项）
+        if (_updating) return;
         if (WebView.CoreWebView2 is not null)
             WebView.CoreWebView2.Reload();
     }
@@ -337,6 +361,8 @@ public partial class MainWindow : Window
         TitleBtnRestart.IsEnabled = false;
         try
         {
+            // R1：先收起 WebView2，覆盖层才可见（审查加固：与更新流程同一时序）
+            WebView.Visibility = Visibility.Collapsed;
             ShowLoading();
             _server.Shutdown();
             var ok = await _server.EnsureServerAsync();
@@ -370,7 +396,204 @@ public partial class MainWindow : Window
     private void MenuSettings_Click(object sender, RoutedEventArgs e)
     {
         MenuPopup.IsOpen = false;
-        new Views.SettingsWindow { Owner = this }.ShowDialog();
+        var dlg = new Views.SettingsWindow { Owner = this };
+        dlg.ShowDialog();
+        // 设置可能改了余额开关，关闭后同步启动/停止
+        SyncBalanceFromSettings();
+    }
+
+    // ---------------- 菜单（Harness 更新） ----------------
+
+    private async void MenuCheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        MenuPopup.IsOpen = false;
+        if (_checking || _updating) return;
+        _checking = true;
+        MenuCheckUpdate.IsEnabled = false;
+        MenuCheckUpdate.Content = "检查更新…";
+        try
+        {
+            // 手动点击一律重新检查（不复用启动时的陈旧结果，审查加固项）
+            var ok = await _updater.CheckAsync();
+            if (!ok)
+            {
+                MessageBox.Show(this,
+                    $"检查更新失败：{_updater.LastError ?? "未知原因"}。\n详情见日志。",
+                    "检查更新", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (_updater.HasUpdate)
+            {
+                var dlg = new Views.ConfirmDialog("发现 Harness 新版本",
+                    $"当前版本：v{_updater.LocalVersion ?? "未知"}\n" +
+                    $"最新版本：v{_updater.LatestVersion}\n\n" +
+                    "更新期间服务会中断，页面将重新加载（约 1 分钟）。是否继续？",
+                    "更新", "暂不") { Owner = this };
+                if (dlg.ShowDialog() == true)
+                    await RunHarnessUpdateAsync();
+            }
+            else
+            {
+                MessageBox.Show(this, _updater.LocalVersion is null
+                        ? "已是最新版本（本地版本未知）。"
+                        : $"已是最新版本（v{_updater.LocalVersion}）。",
+                    "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        finally
+        {
+            _checking = false;
+            MenuCheckUpdate.IsEnabled = true;
+            UpdateMenuButtonText(); // 复位"检查更新…"文案（有新版则显示高亮提示）
+        }
+    }
+
+    /// <summary>执行 Harness 更新：收起页面（R1）→ 停服 → npm install → 重启服务。</summary>
+    private async Task RunHarnessUpdateAsync()
+    {
+        // 前置：端口服务必须由本应用管理（自家拉起或接管验证过的 dsh），非 dsh 占用时无法安全停服
+        if (!_server.IsManaged)
+        {
+            MessageBox.Show(this,
+                "当前端口被非 dsh 服务占用，无法安全更新 Harness。\n请先停止该服务后再试。",
+                "无法更新", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _updating = true;
+        _abortUpdateConfirmed = false;
+        TitleBtnRestart.IsEnabled = false;
+        MenuCheckUpdate.Content = "正在更新 Harness…";
+        try
+        {
+            // R1：WebView2 是 HWND 子窗口，覆盖层盖不住它——必须先收起页面
+            WebView.Visibility = Visibility.Collapsed;
+            ShowLoading();
+            CenterSubtitle.Text = "正在更新 Harness…";
+
+            _server.Shutdown(); // 必须先停服：运行中的 node 进程持有 bin.js 文件句柄，npm 覆盖安装会 EPERM
+            var updated = await _updater.UpdateAsync();
+            var restarted = await _server.EnsureServerAsync();
+
+            if (updated && restarted)
+            {
+                AppendLog("Harness 更新成功，重新加载页面");
+                UpdateMenuButtonText();
+                MessageBox.Show(this,
+                    $"Harness 已更新到 v{_updater.LocalVersion}。",
+                    "更新完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
+            }
+            else
+            {
+                ShowError("更新失败", updated
+                    ? "服务重启失败，请重试或查看日志。"
+                    : $"Harness 更新失败，已尝试恢复服务。\n{_updater.LastError ?? "详情见日志"}；若服务异常请手动执行：\nnpm install -g @deepseek-ai/dsh@latest",
+                    allowRetry: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError("更新失败", ex.Message, allowRetry: true);
+        }
+        finally
+        {
+            _updating = false;
+            TitleBtnRestart.IsEnabled = true;
+            UpdateMenuButtonText(); // 恢复菜单文案（"正在更新 Harness…" → 检查更新/更新可用）
+        }
+    }
+
+    /// <summary>启动后后台自动检查一次（默认开，设置里可关）；只提示不自动安装。</summary>
+    private async void MaybeAutoCheckUpdate()
+    {
+        if (_autoCheckRan || _updating || !AppSettings.Current.AutoCheckUpdate) return;
+        _autoCheckRan = true;
+        try
+        {
+            var ok = await _updater.CheckAsync();
+            if (ok && _updater.HasUpdate)
+            {
+                AppendLog($"发现 Harness 新版本：v{_updater.LocalVersion} → v{_updater.LatestVersion}");
+                UpdateMenuButtonText();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 后台检查失败不打扰用户（写日志即可）；防 async void 未处理异常
+            AppendLog($"自动检查更新异常：{ex.Message}");
+        }
+    }
+
+    /// <summary>菜单项文案：有新版时高亮提示（主题色走资源，R8），否则复位。</summary>
+    private void UpdateMenuButtonText()
+    {
+        if (_updater.LastCheckSucceeded && _updater.HasUpdate)
+        {
+            MenuCheckUpdate.Content = $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}";
+            MenuCheckUpdate.SetResourceReference(Button.ForegroundProperty, "AccentBlueBrush");
+        }
+        else
+        {
+            MenuCheckUpdate.Content = "检查更新";
+            MenuCheckUpdate.ClearValue(Button.ForegroundProperty);
+        }
+    }
+
+    // ---------------- 顶栏余额显示 ----------------
+
+    /// <summary>页面加载完成后启动余额监控（仅设置开启时；幂等）。</summary>
+    private void StartBalanceIfEnabled()
+    {
+        if (!_balanceRunning && AppSettings.Current.ShowBalance)
+        {
+            _balanceRunning = true;
+            TitleBalance.Visibility = Visibility.Visible;
+            TitleBalance.Text = "…";
+            _balance.Start();
+        }
+    }
+
+    /// <summary>设置窗关闭后同步余额开关状态（开 → 启动并立即刷新；关 → 停止并隐藏）。</summary>
+    private void SyncBalanceFromSettings()
+    {
+        if (AppSettings.Current.ShowBalance)
+        {
+            StartBalanceIfEnabled();
+            // 设置可能改了授权/手动 Key：立即刷新一次，撤销授权后顶栏不残留旧值
+            _ = _balance.RefreshAsync();
+        }
+        else if (_balanceRunning)
+        {
+            _balanceRunning = false;
+            _balance.Stop();
+            TitleBalance.Visibility = Visibility.Collapsed;
+            TitleBalance.Text = "";
+        }
+    }
+
+    private void OnBalanceChanged(string? text)
+    {
+        if (text is null)
+        {
+            TitleBalance.Text = "—";
+            TitleBalance.ToolTip = _balance.LastError is null
+                ? "余额获取失败（点击重试）"
+                : $"余额获取失败：{_balance.LastError}（点击重试）";
+        }
+        else
+        {
+            TitleBalance.Text = $"¥ {text}";
+            TitleBalance.ToolTip = _balance.DetailText + "\n点击刷新";
+        }
+    }
+
+    private async void TitleBalance_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (TitleBalance.Visibility != Visibility.Visible) return;
+        // 不预先置"…"：防抖忽略（2s 内重复点击）时无回调恢复，会卡住显示（审查加固项）
+        await _balance.RefreshAsync();
     }
 
     private void TitleBtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
@@ -446,12 +669,32 @@ public partial class MainWindow : Window
     {
         _heartbeat.Stop();
         WindowPlacementStore.Save(this);
+
+        // 更新进行中：拦截关窗，经用户确认才中断安装（半安装比跑完更危险，设计文档 §8）
+        if (_updating && !_abortUpdateConfirmed)
+        {
+            e.Cancel = true;
+            var dlg = new Views.ConfirmDialog("更新正在进行",
+                "Harness 更新正在进行，关闭窗口将中断安装，可能导致 Harness 包不完整。\n\n确定要中断更新并关闭吗？",
+                "中断并关闭", "继续更新") { Owner = this };
+            if (dlg.ShowDialog() == true)
+            {
+                _abortUpdateConfirmed = true;
+                _updater.AbortRunningNpm();
+                AppendLog("用户确认中断 Harness 更新，已终止 npm 安装进程");
+                Close();
+            }
+            return;
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
         _server.Shutdown();
         _server.Dispose();
+        _balance.Stop();
+        _balance.Dispose();
+        _updater.Dispose();
         App.ActiveServer = null;
     }
 

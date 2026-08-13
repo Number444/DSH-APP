@@ -5,12 +5,13 @@
 
 ## 1. 架构定位:纯壳(Wrapper)
 
-dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness 逻辑。它只做四件事:
+dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness 逻辑。它做五件事:
 
 1. 把 `dsh web` 服务器拉起来(若未运行)
 2. 用 WebView2 在独立窗口里渲染 Harness UI
 3. 管理服务器生命周期(关窗即停,仅停自己拉起的 + 接管验证过的)
 4. 提供启动状态、错误提示与断连检测
+5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)与顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)
 
 壳与 Harness 的唯一接触面是 `http://127.0.0.1:3080`(HTTP 边界,零侵入)。
 这也是它对"已安装 dsh 的任意电脑"零适配可用的原因。
@@ -45,11 +46,15 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化 |
-| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单 |
+| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（关于/设置/**检查更新**）、**顶栏余额显示** |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理 |
+| 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较，超时兜底 |
+| 余额层 | `Server/BalanceMonitor.cs` + `Helpers/CredentialsReader.cs` | DeepSeek 余额轮询（60s）、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
+| 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key），settings.json 持久化 |
 | 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听 |
+| 安全层 | `Helpers/DpapiHelper.cs` | DPAPI 加解密（CurrentUser），密钥类字段存储 |
 | 控件层 | `Helpers/CustomScrollBar.cs` | 自定义迷你滚动条(四档过渡,自 Toolbox 移植) |
-| 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` | 设置(主题)、关于窗口 |
+| 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` / `Views/ConfirmDialog` | 设置（主题/更新/余额）、关于、通用确认弹窗 |
 | 资源层 | `Resources/Theme.xaml` | 按钮/滚动条等公用样式(全部 DynamicResource) |
 | 被托管层 | dsh web(node 进程) | Harness UI + API,与本项目完全解耦 |
 
@@ -131,6 +136,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 ## 6. 可移植性设计
 
 - 壳内**零绝对路径硬编码**:不引用 `C:\Agent Space`、不引用 `~/.dsh`(服务器环境由 `dsh web` 按本机 profile 解析)
+- **唯一例外(用户特批)**:余额显示功能在用户经确认弹窗**显式授权**后读取 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY`(仅内存使用、不落盘、可随时在设置页撤销);未授权一律回退环境变量/手动填写,绝无隐式读取
 - **端口可配置/容错**:默认 3080,并发探测 3080~3090
 - 日志与 WebView2 数据均在 `%LOCALAPPDATA%\dsh-app\`,不写安装目录,避免权限问题
 
