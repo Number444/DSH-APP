@@ -8,11 +8,19 @@
         ShowInTaskbar="False"
         Background="{DynamicResource BgWindowBrush}">
     <StackPanel Margin="24,22,24,24">
-        <TextBlock x:Name="TitleText"
-                   FontSize="15"
-                   FontWeight="SemiBold"
-                   Foreground="{DynamicResource TextPrimaryBrush}"
-                   TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal">
+            <TextBlock x:Name="GlyphText"
+                       FontSize="18"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"
+                       Visibility="Collapsed" />
+            <TextBlock x:Name="TitleText"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center" />
+        </StackPanel>
         <TextBlock x:Name="MessageText"
                    Margin="0,12,0,0"
                    FontSize="13"
@@ -38,7 +46,7 @@
                     Padding="20,8"
                     IsDefault="True"
                     Style="{DynamicResource RoundedButton}"
-                    Background="{DynamicResource ButtonGreenBrush}"
+                    Background="{DynamicResource ButtonBlueBrush}"
                     Foreground="White"
                     BorderThickness="0"
                     Click="OkButton_Click" />

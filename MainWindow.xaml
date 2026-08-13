@@ -59,10 +59,6 @@
                         Content="浏览器"
                         Style="{DynamicResource IconButton}"
                         Click="TitleBtnBrowser_Click" />
-                <Button x:Name="TitleBtnLog"
-                        Content="日志"
-                        Style="{DynamicResource IconButton}"
-                        Click="TitleBtnLog_Click" />
                 <Button x:Name="TitleBtnRestart"
                         Content="重启服务"
                         Style="{DynamicResource IconButton}"
@@ -71,18 +67,24 @@
                         Content="菜单"
                         Style="{DynamicResource IconButton}"
                         Click="TitleBtnMenu_Click" />
-                <!-- 余额显示（菜单右侧，非工具按钮；点击手动刷新；仅在设置开启时可见） -->
-                <TextBlock x:Name="TitleBalance"
-                           Margin="8,0,4,0"
-                           MaxWidth="72"
-                           FontSize="12"
-                           Foreground="{DynamicResource TextWeakBrush}"
-                           VerticalAlignment="Center"
-                           Cursor="Hand"
-                           TextTrimming="CharacterEllipsis"
-                           WindowChrome.IsHitTestVisibleInChrome="True"
-                           MouseLeftButtonUp="TitleBalance_Click"
-                           Visibility="Collapsed" />
+                <!-- 余额显示（菜单右侧，非工具按钮；点击手动刷新；仅在设置开启时可见）：
+                     IconButton 样式提供 hover 点击反馈（背景 HoverBgBrush），
+                     与顶栏工具按钮同高 26 同中心，严格一条线 -->
+                <Button x:Name="TitleBalance"
+                        Height="26"
+                        Margin="8,0,4,0"
+                        Padding="8,0"
+                        VerticalAlignment="Center"
+                        Style="{DynamicResource IconButton}"
+                        Foreground="{DynamicResource TextWeakBrush}"
+                        WindowChrome.IsHitTestVisibleInChrome="True"
+                        Click="TitleBalance_Click"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="TitleBalanceText"
+                               MaxWidth="80"
+                               FontSize="12"
+                               TextTrimming="CharacterEllipsis" />
+                </Button>
             </StackPanel>
 
             <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响） -->
@@ -104,6 +106,9 @@
                         <Button Content="设置"
                                 Style="{DynamicResource MenuItemButton}"
                                 Click="MenuSettings_Click" />
+                        <Button Content="日志"
+                                Style="{DynamicResource MenuItemButton}"
+                                Click="MenuLog_Click" />
                         <Button x:Name="MenuCheckUpdate"
                                 Content="检查更新"
                                 Style="{DynamicResource MenuItemButton}"

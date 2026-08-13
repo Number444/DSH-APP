@@ -17,6 +17,8 @@
     <SolidColorBrush x:Key="AccentRedBrush" Color="#CF222E" />
     <SolidColorBrush x:Key="AccentOrangeBrush" Color="#BC4C00" />
     <SolidColorBrush x:Key="ButtonGreenBrush" Color="#1F883D" />
+    <!-- 按钮蓝（主操作按钮底色，与深色 #1F6FEB 同 key 对应） -->
+    <SolidColorBrush x:Key="ButtonBlueBrush" Color="#0969DA" />
 
     <!-- 滚动条（CustomScrollBar 四档，浅色下用深色系 Thumb） -->
     <Color x:Key="ScrollThumbColor">#33000000</Color>

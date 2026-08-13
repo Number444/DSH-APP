@@ -354,8 +354,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void TitleBtnLog_Click(object sender, RoutedEventArgs e) => OpenLog();
-
     private async void TitleBtnRestart_Click(object sender, RoutedEventArgs e)
     {
         TitleBtnRestart.IsEnabled = false;
@@ -393,6 +391,12 @@ public partial class MainWindow : Window
         new Views.AboutWindow { Owner = this }.ShowDialog();
     }
 
+    private void MenuLog_Click(object sender, RoutedEventArgs e)
+    {
+        MenuPopup.IsOpen = false;
+        OpenLog();
+    }
+
     private void MenuSettings_Click(object sender, RoutedEventArgs e)
     {
         MenuPopup.IsOpen = false;
@@ -417,9 +421,9 @@ public partial class MainWindow : Window
             var ok = await _updater.CheckAsync();
             if (!ok)
             {
-                MessageBox.Show(this,
+                new Views.ConfirmDialog("检查更新",
                     $"检查更新失败：{_updater.LastError ?? "未知原因"}。\n详情见日志。",
-                    "检查更新", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    "知道了", glyph: "⚠") { Owner = this }.ShowDialog();
                 return;
             }
 
@@ -435,10 +439,11 @@ public partial class MainWindow : Window
             }
             else
             {
-                MessageBox.Show(this, _updater.LocalVersion is null
+                new Views.ConfirmDialog("检查更新",
+                    _updater.LocalVersion is null
                         ? "已是最新版本（本地版本未知）。"
                         : $"已是最新版本（v{_updater.LocalVersion}）。",
-                    "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+                    "知道了", glyph: "ℹ") { Owner = this }.ShowDialog();
             }
         }
         finally
@@ -455,15 +460,16 @@ public partial class MainWindow : Window
         // 前置：端口服务必须由本应用管理（自家拉起或接管验证过的 dsh），非 dsh 占用时无法安全停服
         if (!_server.IsManaged)
         {
-            MessageBox.Show(this,
+            new Views.ConfirmDialog("无法更新",
                 "当前端口被非 dsh 服务占用，无法安全更新 Harness。\n请先停止该服务后再试。",
-                "无法更新", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "知道了", glyph: "⚠") { Owner = this }.ShowDialog();
             return;
         }
 
         _updating = true;
         _abortUpdateConfirmed = false;
         TitleBtnRestart.IsEnabled = false;
+        MenuCheckUpdate.IsEnabled = false;
         MenuCheckUpdate.Content = "正在更新 Harness…";
         try
         {
@@ -480,9 +486,9 @@ public partial class MainWindow : Window
             {
                 AppendLog("Harness 更新成功，重新加载页面");
                 UpdateMenuButtonText();
-                MessageBox.Show(this,
+                new Views.ConfirmDialog("更新完成",
                     $"Harness 已更新到 v{_updater.LocalVersion}。",
-                    "更新完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                    "好的", glyph: "✓") { Owner = this }.ShowDialog();
                 WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
             }
             else
@@ -501,6 +507,7 @@ public partial class MainWindow : Window
         {
             _updating = false;
             TitleBtnRestart.IsEnabled = true;
+            MenuCheckUpdate.IsEnabled = true;
             UpdateMenuButtonText(); // 恢复菜单文案（"正在更新 Harness…" → 检查更新/更新可用）
         }
     }
@@ -550,7 +557,7 @@ public partial class MainWindow : Window
         {
             _balanceRunning = true;
             TitleBalance.Visibility = Visibility.Visible;
-            TitleBalance.Text = "…";
+            TitleBalanceText.Text = "…";
             _balance.Start();
         }
     }
@@ -569,7 +576,7 @@ public partial class MainWindow : Window
             _balanceRunning = false;
             _balance.Stop();
             TitleBalance.Visibility = Visibility.Collapsed;
-            TitleBalance.Text = "";
+            TitleBalanceText.Text = "";
         }
     }
 
@@ -577,19 +584,19 @@ public partial class MainWindow : Window
     {
         if (text is null)
         {
-            TitleBalance.Text = "—";
+            TitleBalanceText.Text = "—";
             TitleBalance.ToolTip = _balance.LastError is null
                 ? "余额获取失败（点击重试）"
                 : $"余额获取失败：{_balance.LastError}（点击重试）";
         }
         else
         {
-            TitleBalance.Text = $"¥ {text}";
+            TitleBalanceText.Text = $"¥ {text}";
             TitleBalance.ToolTip = _balance.DetailText + "\n点击刷新";
         }
     }
 
-    private async void TitleBalance_Click(object sender, MouseButtonEventArgs e)
+    private async void TitleBalance_Click(object sender, RoutedEventArgs e)
     {
         if (TitleBalance.Visibility != Visibility.Visible) return;
         // 不预先置"…"：防抖忽略（2s 内重复点击）时无回调恢复，会卡住显示（审查加固项）
@@ -676,7 +683,7 @@ public partial class MainWindow : Window
             e.Cancel = true;
             var dlg = new Views.ConfirmDialog("更新正在进行",
                 "Harness 更新正在进行，关闭窗口将中断安装，可能导致 Harness 包不完整。\n\n确定要中断更新并关闭吗？",
-                "中断并关闭", "继续更新") { Owner = this };
+                "中断并关闭", "继续更新", okDanger: true) { Owner = this };
             if (dlg.ShowDialog() == true)
             {
                 _abortUpdateConfirmed = true;
@@ -716,7 +723,82 @@ public partial class MainWindow : Window
         int corner = DWMWCP_ROUND;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
 
+        // 无边框窗口最大化钳制（WM_GETMINMAXINFO）：修正最大化时顶部溢出、底部探入任务栏
+        HwndSource.FromHwnd(hwnd)?.AddHook(WindowProc);
+
         WindowPlacementStore.Restore(this);
+    }
+
+    // ---------------- 最大化钳制（无边框窗口经典修复） ----------------
+
+    private const int WM_GETMINMAXINFO = 0x0024;
+    private const int MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public NativePoint ptReserved;
+        public NativePoint ptMaxSize;
+        public NativePoint ptMaxPosition;
+        public NativePoint ptMinTrackSize;
+        public NativePoint ptMaxTrackSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MonitorInfo
+    {
+        public int cbSize;
+        public NativeRect rcMonitor;
+        public NativeRect rcWork;
+        public int dwFlags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, int dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    /// <summary>
+    /// WindowStyle=None + WindowChrome 下，WPF 最大化默认按整个屏幕扩展窗口
+    /// （顶部溢出屏幕、底部盖住任务栏）。此处把最大化位置/尺寸钳制到窗口
+    /// 所在显示器的工作区（物理像素，系统层面生效，与 DPI 无关）。
+    /// </summary>
+    private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
+
+        var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if (monitor == IntPtr.Zero) return IntPtr.Zero;
+
+        var mi = new MonitorInfo { cbSize = Marshal.SizeOf<MonitorInfo>() };
+        if (!GetMonitorInfo(monitor, ref mi)) return IntPtr.Zero;
+
+        var mmi = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+        mmi.ptMaxPosition.X = mi.rcWork.Left;
+        mmi.ptMaxPosition.Y = mi.rcWork.Top;
+        mmi.ptMaxSize.X = mi.rcWork.Right - mi.rcWork.Left;
+        mmi.ptMaxSize.Y = mi.rcWork.Bottom - mi.rcWork.Top;
+        Marshal.StructureToPtr(mmi, lParam, true);
+        // 不置 handled：让 WPF 的 WmGetMinMaxInfo 继续写 ptMinTrackSize（MinWidth/MinHeight 约束），
+        // 它只改 min/maxTrack，不会覆盖上面写入的 ptMaxSize/ptMaxPosition（审查确认）
+        return IntPtr.Zero;
     }
 
     private void ApplyDwmTheme()

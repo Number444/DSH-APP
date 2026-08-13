@@ -46,7 +46,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化 |
-| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（关于/设置/**检查更新**）、**顶栏余额显示** |
+| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/检查更新/设置/关于）、**顶栏余额显示** |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理 |
 | 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较，超时兜底 |
 | 余额层 | `Server/BalanceMonitor.cs` + `Helpers/CredentialsReader.cs` | DeepSeek 余额轮询（60s）、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
