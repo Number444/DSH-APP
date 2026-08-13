@@ -1,20 +1,35 @@
 # dsh-app — DeepSeek Harness 桌面壳
 
-把 DeepSeek Harness Web GUI 封装成独立 Windows 桌面应用(WPF + WebView2)。
+> v1.0.0(2026-08-14 正式版)
+
+把 DeepSeek Harness Web GUI 封装成独立 Windows 桌面应用(WPF + WebView2,纯壳零侵入)。
 
 ## 它做什么
 
-双击 `dsh-app.exe` → 自动拉起 `dsh web` 服务器(若未运行)→ 无地址栏独立窗口加载 Harness UI → 关闭窗口即停(仅停本应用拉起的服务器)。
+双击 `dsh-app.exe` → 自动拉起 `dsh web` 服务器(若未运行)→ 无地址栏独立窗口加载 Harness UI → 关闭窗口即停(自家拉起的 + 接管验证过的 dsh 一并停止)。
+
+## 特性
+
+- **自绘顶栏**(WindowChrome):纯文字工具按钮(刷新 / 浏览器 / 日志 / 重启服务 / 菜单)
+- **启动状态机**:5 步进度(探测 → 定位环境 → 拉起 → 就绪 → 加载),失败定位到具体步骤
+- **断连检测**:自家进程崩溃(`ServerDied`)与接管服务心跳(30s×2 次)双通道
+- **接管身份验证**:外部 dsh 经 PID + 命令行双重验证后才接管清理,非 dsh 程序绝不误杀
+- **主题系统**:深色 / 浅色 / 跟随系统(读系统主题 + 实时监听),全 DynamicResource 动态切换
+- **菜单下拉**:关于 / 设置(胶囊分段 + 滑块开关,套用 Toolbox 设计)
+- **窗口记忆**:位置/尺寸/最大化状态持久化(防外接屏拔除后窗口丢失)
+- **自定义滚动条**:Toolbox 同款四档过渡(拖拽 > 悬停 Thumb > 悬停轨道 > 常态)
 
 ## 关键行为
 
 | 场景 | 行为 |
 |---|---|
-| 服务器未运行(3080 无服务) | 隐藏窗口启动 `dsh web`,轮询就绪后加载页面 |
-| 服务器已在运行(如旧启动器) | 直接连接,退出时**不**杀它 |
-| 3080 被占用 | 自动探测 3081~3090;都不可用则提示错误 |
+| 服务器未运行(3080 无服务) | 隐藏窗口启动 `dsh web`(直连 node bin.js,不依赖 PATH),轮询就绪后加载页面 |
+| 服务器已在运行 | 识别身份:dsh → 接管(关窗一并停止);非 dsh → 直连不清理 |
+| 3080 被占用 | 并发探测 3081~3090(最坏 ~1s);都不可用则提示错误 |
+| 服务运行中崩溃 | 错误卡片"服务连接已断开" + 重试(接管模式靠心跳感知) |
+| 渲染进程崩溃 | 自动刷新一次,再崩溃 → 错误卡片 |
 | 重复双击 | 单实例,激活已有窗口 |
-| 页面进程崩溃 | 错误卡片 + 重试 |
+| 环境缺失(未装 node/dsh) | 错误卡片直接给出安装步骤指引 |
 
 日志位置:`%LOCALAPPDATA%\dsh-app\app.log`(服务器输出与壳日志)。
 
@@ -24,24 +39,29 @@
 # 开发构建
 dotnet build -c Release
 
-# 发布(self-contained,目标机免装 .NET,可拷到任意 Win10/11)
-dotnet publish -c Release -r win-x64 --self-contained true
-# 产物: bin\Release\net9.0-windows\win-x64\publish\
+# 发布:self-contained 单 exe(目标机免装 .NET,拷走即用)
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+# 产物: bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe (~127MB)
 ```
 
 ## 部署到另一台电脑
 
 目标机前置条件(通常已具备):
-- Node.js + `@deepseek-ai/dsh` 全局安装,`~/.dsh` 配置完整
+- Node.js + `@deepseek-ai/dsh` 全局安装,`~/.dsh` 配置完整(未装则错误卡片会给出安装指引)
 - WebView2 Runtime(Win11 随 Edge 预装;缺则装官方 Evergreen 引导程序)
-- **不需要** .NET(已 self-contained)
+- **不需要** .NET(已 self-contained 单文件)
 
 步骤:
-1. 把 `publish\` 整个文件夹拷到目标机任意目录(如 `D:\dsh-app\`)
+1. 把 `dsh-app.exe` 拷到目标机任意目录(如 `D:\dsh-app\`)
 2. 桌面新建快捷方式,目标指向 `dsh-app.exe`
 3. 双击即用
 
 > 壳内无任何绝对路径硬编码,服务器环境由 `dsh web` 按本机 profile 解析,双机通用。
+
+## 文档
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — 架构、调用链路、设计决策
+- [docs/UI-GUIDELINES.md](docs/UI-GUIDELINES.md) — 窗口架构与 UI 规范(R1~R8 铁律)
 
 ## 回退
 
