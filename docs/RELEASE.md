@@ -25,7 +25,11 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ```
 
 **前置检查**：
-- 无运行中的 dsh-app 实例（exe 被进程锁定会发布失败——MSB3027 文件占用错误）
+- 无运行中的 dsh-app 实例（exe 被进程锁定会发布失败——MSB3027 文件占用错误）。**直接执行脚本关闭**：
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\close-dsh-app.ps1
+  ```
+  （脚本优雅关闭优先，自动清理其拉起的服务；5 秒未响应才强杀兜底）
 - 无未提交改动（发布产物应对应已 commit 的代码）
 
 **发布后冒烟**（产物 exe，非 bin 目录版本）：
