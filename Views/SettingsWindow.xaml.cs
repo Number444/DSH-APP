@@ -14,6 +14,8 @@ public partial class SettingsWindow : Window
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private const int DWMWCP_ROUND = 2;
 
+    private readonly Action<bool> _themeHandler;
+
     public SettingsWindow()
     {
         InitializeComponent();
@@ -25,8 +27,10 @@ public partial class SettingsWindow : Window
         RadioLight.IsChecked = theme == AppTheme.Light;
         UpdateEnabled();
 
-        // 主题切换时联动标题栏深色
-        ThemeManager.ThemeChanged += _ => ApplyDwm();
+        // 主题切换时联动标题栏深色（关闭时解除，防订阅泄漏）
+        _themeHandler = _ => ApplyDwm();
+        ThemeManager.ThemeChanged += _themeHandler;
+        Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
     }
 
     private void OnThemeChanged(object sender, RoutedEventArgs e)

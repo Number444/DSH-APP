@@ -279,9 +279,10 @@
                             SnapsToDevicePixels="True">
                         <!-- Thumb 轨道区：常态 6px 细条居中于 16px 容器（常态两侧各留 5px、
                              展开 10px 各留 3px，任何状态都不碰窗口边缘）；
-                             宽度/颜色四档过渡由 CustomScrollBar.UpdateThumbVisual 驱动 -->
+                             颜色由代码 UpdateThumbVisual 按四档设置（模板初始透明即可，
+                             不可直接绑 Color 资源到 Brush 属性——DynamicResource 不做类型转换） -->
                         <Border x:Name="ThumbElement"
-                                Background="{DynamicResource ScrollThumbColor}"
+                                Background="Transparent"
                                 CornerRadius="3"
                                 Width="6"
                                 HorizontalAlignment="Center"

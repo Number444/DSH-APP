@@ -12,10 +12,15 @@ public partial class AboutWindow : Window
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private const int DWMWCP_ROUND = 2;
 
+    private readonly Action<bool> _themeHandler;
+
     public AboutWindow()
     {
         InitializeComponent();
-        ThemeManager.ThemeChanged += _ => ApplyDwm();
+        // 关闭时解除订阅，防泄漏
+        _themeHandler = _ => ApplyDwm();
+        ThemeManager.ThemeChanged += _themeHandler;
+        Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
