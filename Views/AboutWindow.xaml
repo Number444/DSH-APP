@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="关于"
-        Width="440"
+        Width="400"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -32,37 +32,5 @@
                    LineHeight="22"
                    FontSize="13"
                    Foreground="{DynamicResource TextSecondaryBrush}" />
-
-        <Border Height="1"
-                Margin="0,16,0,0"
-                Background="{DynamicResource BorderBrush}" />
-
-        <StackPanel Margin="0,14,0,0">
-            <TextBlock Text="壳只做四件事："
-                       FontSize="12"
-                       FontWeight="SemiBold"
-                       Foreground="{DynamicResource TextPrimaryBrush}" />
-            <TextBlock Text="· 拉起并管理 dsh web 服务器生命周期"
-                       Margin="0,8,0,0"
-                       FontSize="12"
-                       Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBlock Text="· WebView2 独立窗口渲染 Harness UI"
-                       Margin="0,4,0,0"
-                       FontSize="12"
-                       Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBlock Text="· 启动步骤状态机与断连检测（含心跳）"
-                       Margin="0,4,0,0"
-                       FontSize="12"
-                       Foreground="{DynamicResource TextSecondaryBrush}" />
-            <TextBlock Text="· 深色 / 浅色主题，可跟随系统"
-                       Margin="0,4,0,0"
-                       FontSize="12"
-                       Foreground="{DynamicResource TextSecondaryBrush}" />
-        </StackPanel>
-
-        <TextBlock Text="与 Harness 的接触面仅 http://127.0.0.1:3080（HTTP 边界）。"
-                   Margin="0,16,0,0"
-                   FontSize="11"
-                   Foreground="{DynamicResource TextWeakBrush}" />
     </StackPanel>
 </Window>

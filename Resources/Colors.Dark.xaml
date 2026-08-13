@@ -24,4 +24,8 @@
     <Color x:Key="ScrollBarHoverColor">#55FFFFFF</Color>
     <Color x:Key="ScrollDragColor">#CC58A6FF</Color>
 
+    <!-- 开关（ToggleSwitch）轨道 -->
+    <SolidColorBrush x:Key="ToggleTrackOffBrush" Color="#45475A" />
+    <SolidColorBrush x:Key="ToggleTrackOnBrush" Color="#58A6FF" />
+
 </ResourceDictionary>

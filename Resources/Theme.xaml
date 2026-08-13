@@ -145,6 +145,126 @@
         </Setter>
     </Style>
 
+    <!-- ========== 极简滑块开关（Win11 风格 ToggleSwitch，Toolbox 同款） ========== -->
+    <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid Background="Transparent">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <!-- 轨道 -->
+                        <Border x:Name="Track"
+                                Width="42"
+                                Height="22"
+                                CornerRadius="11"
+                                Background="{DynamicResource ToggleTrackOffBrush}"
+                                SnapsToDevicePixels="True">
+                            <!-- 滑块 -->
+                            <Border x:Name="Thumb"
+                                    Width="18"
+                                    Height="18"
+                                    CornerRadius="9"
+                                    Background="{DynamicResource TextPrimaryBrush}"
+                                    HorizontalAlignment="Left"
+                                    Margin="2,0,0,0"
+                                    SnapsToDevicePixels="True">
+                                <Border.RenderTransform>
+                                    <TranslateTransform X="0" />
+                                </Border.RenderTransform>
+                            </Border>
+                        </Border>
+                        <!-- 内容（标签文字） -->
+                        <ContentPresenter Grid.Column="1"
+                                          Margin="10,0,0,0"
+                                          VerticalAlignment="Center"
+                                          TextBlock.Foreground="{TemplateBinding Foreground}" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource TextSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Thumb"
+                                                         Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                         To="20"
+                                                         Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut" />
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Thumb"
+                                                         Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)"
+                                                         To="0"
+                                                         Duration="0:0:0.2">
+                                            <DoubleAnimation.EasingFunction>
+                                                <CubicEase EasingMode="EaseOut" />
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                            <Setter TargetName="Track" Property="Background" Value="{DynamicResource ToggleTrackOnBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ========== 胶囊分段选择器（单选，选中片浮起高亮） ========== -->
+    <Style x:Key="CapsuleSegmentStyle" TargetType="RadioButton">
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="bd"
+                            Background="Transparent"
+                            CornerRadius="13"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          TextBlock.Foreground="{TemplateBinding Foreground}"
+                                          TextBlock.FontWeight="{TemplateBinding FontWeight}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource BgCardBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- ========== 自定义迷你滚动条（四档过渡，颜色跟随主题） ========== -->
     <Style TargetType="helpers:CustomScrollBar">
         <Setter Property="Width" Value="16" />
