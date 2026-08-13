@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-14 · 版本 v1.0.0(正式版) · 本次更新:主题系统、接管身份验证、单文件发布、菜单/设置/关于
+> 更新时间:2026-08-14 · 版本 v1.0.0(正式版) · 本次更新:Harness 更新机制、顶栏余额显示、日志移入菜单、最大化钳制与 PerMonitorV2、弹窗自绘体系
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -46,16 +46,17 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化 |
-| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/检查更新/设置/关于）、**顶栏余额显示** |
-| 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理 |
-| 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较，超时兜底 |
-| 余额层 | `Server/BalanceMonitor.cs` + `Helpers/CredentialsReader.cs` | DeepSeek 余额轮询（60s）、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
-| 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key），settings.json 持久化 |
-| 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听 |
+| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/检查更新/设置/关于）、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
+| 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
+| 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较，超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
+| 余额层 | `Server/BalanceMonitor.cs` + `Helpers/CredentialsReader.cs` | DeepSeek 余额轮询（60s）、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
+| 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key），settings.json 持久化（Lazy + 原子替换） |
+| 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听；`ButtonBlueBrush`（主操作按钮，对比度达标） |
 | 安全层 | `Helpers/DpapiHelper.cs` | DPAPI 加解密（CurrentUser），密钥类字段存储 |
 | 控件层 | `Helpers/CustomScrollBar.cs` | 自定义迷你滚动条(四档过渡,自 Toolbox 移植) |
-| 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` / `Views/ConfirmDialog` | 设置（主题/更新/余额）、关于、通用确认弹窗 |
+| 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` / `Views/ConfirmDialog` | 设置（主题/更新/余额）、关于、通用自绘弹窗（单/双按钮 + glyph + 破坏性红色模式） |
 | 资源层 | `Resources/Theme.xaml` | 按钮/滚动条等公用样式(全部 DynamicResource) |
+| 清单层 | `app.manifest` | PerMonitorV2 DPI 感知（混合 DPI 多屏修复） |
 | 被托管层 | dsh web(node 进程) | Harness UI + API,与本项目完全解耦 |
 
 ## 2. 启动调用链路
@@ -95,6 +96,8 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
       ③ 双双就绪 → WebView.CoreWebView2.Navigate("http://127.0.0.1:3080")
   → WebView2 渲染 Harness 前端 → NavigationCompleted(IsSuccess)
       → WebView.Visibility=Visible → HideOverlay(150ms 淡出)→ 用户看到可对话界面
+      → StartBalanceIfEnabled()(余额开启时启动 60s 轮询)
+      → MaybeAutoCheckUpdate()(自动检查开启时后台 npm view 一次,发现新版菜单高亮)
 ```
 
 ## 3. 运行时数据流
@@ -118,6 +121,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 渲染进程崩溃 | `ProcessFailed(RenderProcessExited/Unresponsive)` → 自动 `Reload()` 一次,再崩溃 → 错误卡 + 重试 |
 | 页面进程退出 | WebView2 `ProcessFailed(BrowserProcessExited)` → 覆盖层"页面进程已退出" + 重试 |
 | 导航失败 | `NavigationCompleted(!IsSuccess)` → 错误卡片 + 重试(重试先 Shutdown 再重新 Ensure) |
+| 更新中关窗 | `OnClosing` 拦截 + ConfirmDialog"中断并关闭/继续更新"；确认后 `AbortRunningNpm` 终止安装并关闭（半安装比跑完更危险）；`Dispose` 不杀进程 |
+| 更新失败 | 先 `EnsureServerAsync()` 恢复旧服务 → 错误卡 + `LastError` 原因 + 手动安装指引 |
+| 余额刷新失败 | 点击余额 → 状态卡"正在刷新…"→ 成功 ✓绿 / 失败 ✗红 / 防抖忽略 ⚠橙（仅用户点击场景弹窗，轮询静默） |
 | 未捕获异常 | `DispatcherUnhandledException` → 写日志 → 停服务器 → 提示 → 退出 |
 | 重复双击 | 第二实例 Mutex 冲突 → 激活第一个 → 退出码 0 |
 
@@ -132,6 +138,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 7. **airspace 三重规避**——WebView2 初始 Collapsed(覆盖层可见)、页面完成才 Visible(无黑屏)、内容区四周留 5px resize 热区(可拖拽调窗)
 8. **主题三模式**——深/浅/跟随系统;双套配色字典同名 key + 全 DynamicResource 引用,切换即全界面生效
 9. **self-contained 单文件发布**——目标机免装 .NET,`PublishSingleFile` 单 exe 拷走即用
+10. **最大化钳制（WM_GETMINMAXINFO）**——无边框窗口最大化时把位置/尺寸钳到所在显示器工作区（物理像素,系统层面生效）;不置 `handled` 让 WPF 继续写 MinWidth/MinHeight 约束;配合 `app.manifest` PerMonitorV2 修复混合 DPI 多屏错配与跨屏模糊
+11. **更新流程安全**——停服前置（文件句柄 EPERM）、装后版本验证（防 npm 静默失败）、`IsManaged` 前置（非 dsh 占端口拒绝）、更新中关窗拦截确认、`Dispose` 不杀进程（让安装跑完）
+12. **弹窗自绘体系**——`ConfirmDialog` 单/双按钮 + 类型 glyph（⚠/ℹ/✓）+ 破坏性红色模式;主操作按钮用 `ButtonBlueBrush`（深色 #1F6FEB 白字 4.6:1 达标,不用 #58A6FF 作按钮底）
 
 ## 6. 可移植性设计
 
@@ -145,7 +154,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 - 壳日志 + 服务器输出:`%LOCALAPPDATA%\dsh-app\app.log`
 - 服务器进程自身日志:`%LOCALAPPDATA%\dsh-app\server.log`(由 dsh web 输出,经 Log 事件落盘)
 - 窗口位置/尺寸/最大化状态:`%LOCALAPPDATA%\dsh-app\window.json`(还原前校验与虚拟屏有交集,防外接屏拔除后窗口不可见)
-- 主题设置:`%LOCALAPPDATA%\dsh-app\settings.json`(深/浅/跟随系统)
+- 设置:`%LOCALAPPDATA%\dsh-app\settings.json`(主题/自动检查更新/余额开关/凭据读取授权标记/手动 Key 的 DPAPI 密文,原子写入)
 
 ## 8. 排除的备选方案(决策记录)
 
