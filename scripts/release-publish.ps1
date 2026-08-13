@@ -9,7 +9,8 @@
 # 退出码：0 = 发布成功且窗口已交付；非 0 = 失败（见错误信息）。
 
 param(
-    [switch]$SkipSmoke  # 跳过冒烟关窗验证（直接交付窗口）
+    [switch]$SmokeFull  # 完整冒烟（含关窗释放验证）——仅离线场景可用：关窗会杀掉
+                        # 被接管的 3080 服务，即当前 Web GUI 会话（工具通道），会中断发布
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,35 +54,15 @@ function Start-And-Wait-Ready {
     return $false
 }
 
-# ④ 冒烟：就绪 → 关窗释放验证（优雅关闭）
-if (-not $SkipSmoke) {
-    Write-Host '--- smoke test: start artifact, wait 3080 ready ---' -ForegroundColor Cyan
-    if (-not (Start-And-Wait-Ready)) { throw 'smoke failed: 3080 not ready within 30s' }
-    Write-Host 'smoke ready OK (HTTP alive)' -ForegroundColor Green
-    Start-Sleep -Seconds 2
-    $proc = Get-Process -Name 'dsh-app' -ErrorAction SilentlyContinue
-    if ($proc) {
-        $null = $proc.CloseMainWindow()
-        $null = $proc.WaitForExit(5000)
-        Start-Sleep -Seconds 2
-    }
-    $left = netstat -ano | Select-String ':3080' | Select-String 'LISTENING'
-    if ($left) {
-        Write-Warning "port 3080 still listening after close: $($left.ToString().Trim()) (external service? continue)"
-    }
-    else {
-        Write-Host 'close-and-release check OK' -ForegroundColor Green
-    }
-}
-
-# ⑤ 重新打开窗口（交付，工作流不中断）
-Write-Host '--- reopening the app ---' -ForegroundColor Cyan
+# ④ 启动产物：就绪验证即交付（不关窗！）
+# 注意：不能做"关窗释放"验证——新实例会接管 3080 上的既有服务（孤儿 dsh web），
+# 关窗会把它一并杀掉，而该服务承载当前 Web GUI 会话（工具通道），杀掉即中断发布。
+# 因此默认只验证"启动 + 3080 就绪"，窗口保留交付；完整关窗验证仅离线场景可用（-SmokeFull）。
+Write-Host '--- starting artifact and waiting 3080 ready (deliver, no close) ---' -ForegroundColor Cyan
 if (-not (Start-And-Wait-Ready)) {
-    Write-Warning 'window started but 3080 not ready; check the window state'
+    throw 'startup failed: 3080 not ready within 30s'
 }
-else {
-    Write-Host 'app ready, window delivered OK' -ForegroundColor Green
-}
+Write-Host 'app ready, window delivered OK (smoke: HTTP alive + window up)' -ForegroundColor Green
 
 Write-Host '=== publish done. step 3 (push) is decided by the owner: git push origin main ===' -ForegroundColor Cyan
 exit 0
