@@ -75,9 +75,11 @@
                         Margin="8,0,4,0"
                         Padding="8,0"
                         VerticalAlignment="Center"
+                        RenderTransformOrigin="0.5,0.5"
                         Style="{DynamicResource IconButton}"
                         Foreground="{DynamicResource TextWeakBrush}"
                         WindowChrome.IsHitTestVisibleInChrome="True"
+                        PreviewMouseLeftButtonDown="TitleBalance_PreviewMouseDown"
                         Click="TitleBalance_Click"
                         Visibility="Collapsed">
                     <TextBlock x:Name="TitleBalanceText"
@@ -86,6 +88,24 @@
                                TextTrimming="CharacterEllipsis" />
                 </Button>
             </StackPanel>
+
+            <!-- 余额刷新状态卡（锚定余额按钮下方；Popup 独立 HWND，不受 airspace 影响） -->
+            <Popup x:Name="BalanceStatusPopup"
+                   Placement="Bottom"
+                   PlacementTarget="{Binding ElementName=TitleBalance}"
+                   AllowsTransparency="True"
+                   StaysOpen="False"
+                   IsOpen="False">
+                <Border Padding="12,8"
+                        Background="{DynamicResource BgCardBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                    <TextBlock x:Name="BalanceStatusText"
+                               FontSize="12"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                </Border>
+            </Popup>
 
             <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响） -->
             <Popup x:Name="MenuPopup"

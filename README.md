@@ -64,8 +64,9 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — 架构、调用链路、设计决策
 - [docs/UI-GUIDELINES.md](docs/UI-GUIDELINES.md) — 窗口架构与 UI 规范(R1~R8 铁律)
-- [docs/UPDATE-MECHANISM.md](docs/UPDATE-MECHANISM.md) — Harness 更新机制设计（待实现）
-- [docs/BALANCE-DISPLAY.md](docs/BALANCE-DISPLAY.md) — 顶栏余额显示设计（待实现）
+- [docs/UPDATE-MECHANISM.md](docs/UPDATE-MECHANISM.md) — Harness 更新机制设计（已实现）
+- [docs/BALANCE-DISPLAY.md](docs/BALANCE-DISPLAY.md) — 顶栏余额显示设计（已实现）
+- [docs/RELEASE.md](docs/RELEASE.md) — 发布流程（commit → 单 exe → push 由主人确定）
 
 ## 回退
 

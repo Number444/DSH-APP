@@ -41,6 +41,10 @@ public partial class MainWindow : Window
     private bool _updating;
     private bool _balanceRunning;
     private bool _abortUpdateConfirmed;
+    /// <summary>用户点击余额触发的刷新待结果（仅此场景弹状态窗；后台轮询不弹）。</summary>
+    private bool _userRefreshPending;
+    /// <summary>状态窗序号：防快速连续点击时旧延迟关闭误关新弹窗。</summary>
+    private int _statusSeq;
 
     public MainWindow()
     {
@@ -588,19 +592,74 @@ public partial class MainWindow : Window
             TitleBalance.ToolTip = _balance.LastError is null
                 ? "余额获取失败（点击重试）"
                 : $"余额获取失败：{_balance.LastError}（点击重试）";
+            if (_userRefreshPending)
+            {
+                _userRefreshPending = false;
+                ShowBalanceStatus($"✗ 刷新失败：{_balance.LastError ?? "未知原因"}",
+                    (Brush)FindResource("AccentRedBrush"));
+            }
         }
         else
         {
             TitleBalanceText.Text = $"¥ {text}";
             TitleBalance.ToolTip = _balance.DetailText + "\n点击刷新";
+            if (_userRefreshPending)
+            {
+                _userRefreshPending = false;
+                ShowBalanceStatus($"✓ 余额已更新：¥ {text}",
+                    (Brush)FindResource("AccentGreenBrush"));
+            }
         }
+    }
+
+    /// <summary>在余额按钮下方显示状态卡（自动关闭；序号防连续点击竞态）。</summary>
+    private async void ShowBalanceStatus(string text, Brush? brush = null, int stayMs = 2200)
+    {
+        var seq = ++_statusSeq;
+        BalanceStatusText.Text = text;
+        BalanceStatusText.Foreground = brush ?? (Brush)FindResource("TextSecondaryBrush");
+        BalanceStatusPopup.IsOpen = true;
+        await Task.Delay(stayMs);
+        if (seq == _statusSeq)
+            BalanceStatusPopup.IsOpen = false;
+    }
+
+    /// <summary>按下反馈：余额按钮内容轻微缩小（配合 Click 的弹性弹回，构成点击动效）。</summary>
+    private void TitleBalance_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        var scale = new ScaleTransform(0.94, 0.94);
+        TitleBalance.RenderTransform = scale;
+        var shrink = new DoubleAnimation(0.94, TimeSpan.FromMilliseconds(80));
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
     }
 
     private async void TitleBalance_Click(object sender, RoutedEventArgs e)
     {
         if (TitleBalance.Visibility != Visibility.Visible) return;
-        // 不预先置"…"：防抖忽略（2s 内重复点击）时无回调恢复，会卡住显示（审查加固项）
-        await _balance.RefreshAsync();
+        // 弹回动效（BackEase 轻微过冲，模拟弹性按键）
+        if (TitleBalance.RenderTransform is ScaleTransform scale)
+        {
+            var pop = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(260))
+            {
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 },
+            };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+        }
+
+        // 状态卡：先显示"刷新中"，结果由 BalanceChanged 回调更新（仅用户点击场景弹窗）
+        _userRefreshPending = true;
+        ShowBalanceStatus("正在刷新余额…");
+        var requested = await _balance.RefreshAsync();
+        if (!requested)
+        {
+            // 防抖/防重入忽略：无回调会来，直接提示并复位
+            _userRefreshPending = false;
+            ShowBalanceStatus("操作太频繁，请稍后再试",
+                (Brush)FindResource("AccentOrangeBrush"));
+        }
     }
 
     private void TitleBtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;

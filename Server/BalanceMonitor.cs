@@ -95,31 +95,36 @@ public sealed class BalanceMonitor : IDisposable
         Stop();
     }
 
-    /// <summary>手动刷新（余额文本点击触发）。防抖：距上次请求 &lt;2s 忽略；已有在途请求时忽略。</summary>
-    public async Task RefreshAsync()
+    /// <summary>
+    /// 手动刷新（余额文本点击触发）。返回 true = 实际发起请求（结果经 BalanceChanged 回调）；
+    /// false = 被防抖（距上次请求 &lt;2s）/ 防重入（在途请求）/ 已停止 忽略，调用方据此提示用户。
+    /// </summary>
+    public async Task<bool> RefreshAsync()
     {
         if (Volatile.Read(ref _stopped))
-            return;
+            return false;
 
         // 防抖：距上次请求不足 2s 忽略（CAS 抢占，并发调用仅一个进入）
         var now = DateTime.UtcNow.Ticks;
         var previous = Interlocked.Read(ref _lastRequestTicks);
         if (now - previous < DebounceTicks)
-            return;
+            return false;
         if (Interlocked.CompareExchange(ref _lastRequestTicks, now, previous) != previous)
-            return;
+            return false;
 
         // 防重入：已有在途请求则忽略
         if (Interlocked.Exchange(ref _refreshing, 1) != 0)
-            return;
+            return false;
 
         try
         {
             await RefreshCoreAsync().ConfigureAwait(false);
+            return true; // 请求已实际发起（结果由回调体现）
         }
         catch
         {
-            // 兜底：轮询由 Timer 驱动，未预期异常不得外泄（也不记录，红线）
+            // 兜底：轮询由 Timer 驱动，未预期异常不得外泄（也不记录，红线）；请求已发起，仍按 true 计
+            return true;
         }
         finally
         {
