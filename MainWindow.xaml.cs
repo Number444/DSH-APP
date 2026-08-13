@@ -1,10 +1,17 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using dsh_app.Server;
 using Microsoft.Web.WebView2.Core;
 
@@ -16,10 +23,15 @@ namespace dsh_app;
 public partial class MainWindow : Window
 {
     private const int DWM_USE_IMMERSIVE_DARK_MODE = 20;
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
 
     private readonly ServerController _server = new();
     private readonly StringBuilder _logTail = new();
     private readonly string _logFilePath;
+    private readonly ObservableCollection<StepRow> _steps = new();
+    private readonly DispatcherTimer _heartbeat;
+    private int _heartbeatMisses;
+    private bool _rendererReloadTried;
 
     public MainWindow()
     {
@@ -32,11 +44,27 @@ public partial class MainWindow : Window
         _logFilePath = Path.Combine(logDir, "app.log");
 
         _server.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
+        _server.StepChanged += (step, status, detail) => Dispatcher.Invoke(() => UpdateStep(step, status, detail));
+        _server.ServerDied += () => Dispatcher.Invoke(OnServerDied);
+
+        // 接管模式（外部 dsh）心跳：进程不归属本壳，只能靠 HTTP 探测感知死亡
+        _heartbeat = new DispatcherTimer { Interval = HeartbeatInterval };
+        _heartbeat.Tick += OnHeartbeatTick;
+
+        // 预置 5 步状态行（前 4 步由 ServerController 驱动，第 5 步由窗口维护）
+        _steps.Add(new StepRow(ServerStep.Detect, "探测已有服务"));
+        _steps.Add(new StepRow(ServerStep.Resolve, "定位运行环境"));
+        _steps.Add(new StepRow(ServerStep.Launch, "启动 dsh web 进程"));
+        _steps.Add(new StepRow(ServerStep.WaitReady, "等待服务就绪"));
+        _steps.Add(new StepRow(ServerStep.Load, "加载界面"));
+        StepList.ItemsSource = _steps;
 
         App.ActiveServer = _server;
 
         Loaded += OnLoaded;
+        Closing += OnClosing;
         Closed += OnClosed;
+        StateChanged += (_, _) => UpdateMaxButtonGlyph();
     }
 
     // ---------------- 启动流程 ----------------
@@ -45,14 +73,17 @@ public partial class MainWindow : Window
     {
         try
         {
-            await InitWebViewAsync();
+            // 最先显示覆盖层：WebView2 首次冷启动可能耗时数秒，不能让它黑屏干等
             ShowLoading();
-            var ok = await _server.EnsureServerAsync();
-            if (!ok)
+
+            // WebView2 初始化与服务拉起互不依赖，并行执行缩短冷启动
+            var webTask = InitWebViewAsync();
+            var srvTask = _server.EnsureServerAsync();
+            await Task.WhenAll(webTask, srvTask);
+
+            if (!srvTask.Result)
             {
-                ShowError("dsh 服务启动失败", _server.IsSelfStarted
-                    ? "请查看日志确认 dsh 是否安装、端口是否被占用。"
-                    : _logTail.ToString().TrimEnd(), allowRetry: true);
+                ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
 
@@ -72,11 +103,15 @@ public partial class MainWindow : Window
             "WebView2");
 
         var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+        // 与窗口同底色，消除导航/刷新瞬间的白色闪烁
+        WebView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x0D, 0x11, 0x17);
         await WebView.EnsureCoreWebView2Async(env);
 
         var wv = WebView.CoreWebView2;
         wv.Settings.AreDefaultContextMenusEnabled = true;
         wv.Settings.IsStatusBarEnabled = false;
+        // 深色偏好传递给页面：滚动条/表单控件走深色（仅偏好提示，不改页面内容）
+        wv.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
 
         wv.NavigationCompleted += OnNavigationCompleted;
         wv.ProcessFailed += OnProcessFailed;
@@ -89,51 +124,161 @@ public partial class MainWindow : Window
         if (e.IsSuccess)
         {
             AppendLog($"页面加载完成: {WebView.CoreWebView2.Source}");
+            UpdateStep(ServerStep.Load, StepStatus.Done, "界面加载完成");
+            // 页面已渲染完成：显示 WebView2 再收起覆盖层，避免黑屏空窗
+            WebView.Visibility = Visibility.Visible;
             HideOverlay();
+            _rendererReloadTried = false;
+            StartHeartbeatIfAdopted();
         }
         else
         {
             AppendLog($"页面加载失败: {e.WebErrorStatus}");
+            UpdateStep(ServerStep.Load, StepStatus.Failed, $"WebView2 连接失败（{e.WebErrorStatus}）");
             ShowError("页面加载失败", $"WebView2 无法连接服务器（{e.WebErrorStatus}）。\n服务器可能已停止。", allowRetry: true);
         }
     }
 
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
     {
-        if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
+        switch (e.ProcessFailedKind)
         {
-            Dispatcher.Invoke(() =>
-                ShowError("页面进程已退出", "浏览器内核异常退出，服务器可能仍在运行。", allowRetry: true));
+            case CoreWebView2ProcessFailedKind.BrowserProcessExited:
+                Dispatcher.Invoke(() =>
+                    ShowError("页面进程已退出", "浏览器内核异常退出，服务器可能仍在运行。", allowRetry: true));
+                break;
+
+            case CoreWebView2ProcessFailedKind.RenderProcessExited:
+            case CoreWebView2ProcessFailedKind.RenderProcessUnresponsive:
+                // 渲染进程崩溃：自动刷新一次，仍失败则交给 NavigationCompleted 的错误路径
+                Dispatcher.Invoke(() =>
+                {
+                    AppendLog($"渲染进程异常（{e.ProcessFailedKind}），自动刷新页面");
+                    if (!_rendererReloadTried && WebView.CoreWebView2 is not null)
+                    {
+                        _rendererReloadTried = true;
+                        WebView.CoreWebView2.Reload();
+                    }
+                    else
+                    {
+                        ShowError("页面渲染异常", "页面进程反复崩溃，请重试或重启服务。", allowRetry: true);
+                    }
+                });
+                break;
         }
+    }
+
+    // ---------------- 服务断连检测 ----------------
+
+    /// <summary>自家拉起的 dsh 进程在就绪后中途退出（ServerController.ServerDied）。</summary>
+    private void OnServerDied()
+    {
+        AppendLog("检测到 dsh 服务进程已退出");
+        ShowServiceLostError("dsh 服务进程意外退出。");
+    }
+
+    /// <summary>接管模式下页面加载完成后启动心跳（自家模式由进程 Exited 事件覆盖）。</summary>
+    private void StartHeartbeatIfAdopted()
+    {
+        _heartbeatMisses = 0;
+        if (!_server.IsSelfStarted)
+            _heartbeat.Start();
+    }
+
+    private async void OnHeartbeatTick(object? sender, EventArgs e)
+    {
+        var alive = await _server.CheckAliveAsync();
+        if (alive)
+        {
+            _heartbeatMisses = 0;
+            return;
+        }
+        _heartbeatMisses++;
+        if (_heartbeatMisses < 2) return; // 连续 2 次失败才判定死亡，避免单次抖动误报
+
+        _heartbeat.Stop();
+        AppendLog("心跳检测：dsh 服务已停止响应");
+        ShowServiceLostError("dsh 服务已停止响应（可能已被外部关闭）。");
+    }
+
+    /// <summary>服务丢失统一入口：收起 WebView（airspace，WPF 覆盖层盖不住 HWND）再显示错误卡。</summary>
+    private void ShowServiceLostError(string detail)
+    {
+        _heartbeat.Stop();
+        WebView.Visibility = Visibility.Collapsed;
+        ShowError("服务连接已断开", detail + "\n点击重试重新拉起服务。", allowRetry: true);
     }
 
     // ---------------- 覆盖层控制 ----------------
 
+    /// <summary>淡入显示覆盖层（纯 WPF 层，不受 airspace 限制）。</summary>
+    private void FadeInOverlay()
+    {
+        Overlay.BeginAnimation(OpacityProperty, null); // 清除残留动画，避免状态竞争
+        if (Overlay.Visibility != Visibility.Visible)
+        {
+            Overlay.Opacity = 0;
+            Overlay.Visibility = Visibility.Visible;
+        }
+        Overlay.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
+    }
+
     private void ShowLoading()
     {
-        Overlay.Visibility = Visibility.Visible;
-        OverlayGlyph.Text = "◈";
-        OverlayTitle.Text = "正在启动 DeepSeek Harness…";
+        _heartbeat.Stop(); // 启动/重试期间不做死亡判定
+        ResetSteps();
+        FadeInOverlay();
+        CenterBrand.Visibility = Visibility.Visible;
+        CenterSubtitle.Text = "正在启动 DeepSeek Harness…";
+        CenterError.Visibility = Visibility.Collapsed;
+        OverlayProgress.Visibility = Visibility.Visible;
         OverlayDetail.Text = string.IsNullOrWhiteSpace(_logTail.ToString())
             ? "正在拉起 dsh web 服务并等待就绪，首次启动可能需要 10~20 秒…"
             : _logTail.ToString().TrimEnd();
-        OverlayProgress.Visibility = Visibility.Visible;
-        OverlayActions.Visibility = Visibility.Collapsed;
+        OverlayLogScroller.ScrollToEnd();
+    }
+
+    /// <summary>重置全部步骤为待执行（重试/重新启动时调用）。</summary>
+    private void ResetSteps()
+    {
+        foreach (var row in _steps)
+            row.Update(StepStatus.Pending, "");
+    }
+
+    /// <summary>更新某一步骤的状态（来自 ServerController 事件或本窗口）。</summary>
+    private void UpdateStep(ServerStep step, StepStatus status, string detail)
+    {
+        var row = _steps.FirstOrDefault(r => r.Step == step);
+        if (row is not null)
+            row.Update(status, detail);
     }
 
     private void ShowError(string title, string detail, bool allowRetry = false)
     {
-        Overlay.Visibility = Visibility.Visible;
+        FadeInOverlay();
+        CenterBrand.Visibility = Visibility.Collapsed;
+        CenterError.Visibility = Visibility.Visible;
         OverlayGlyph.Text = "⚠";
-        OverlayGlyph.Foreground = System.Windows.Media.Brushes.Orange;
+        OverlayGlyph.Foreground = Brushes.Orange;
         OverlayTitle.Text = title;
-        OverlayDetail.Text = detail;
+        OverlayErrorDetail.Text = detail;
         OverlayProgress.Visibility = Visibility.Collapsed;
         OverlayActions.Visibility = Visibility.Visible;
         RetryButton.Visibility = allowRetry ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void HideOverlay() => Overlay.Visibility = Visibility.Collapsed;
+    /// <summary>淡出并收起覆盖层；调用前必须先显示 WebView2（R1 时序）。</summary>
+    private void HideOverlay()
+    {
+        var anim = new DoubleAnimation(0, TimeSpan.FromMilliseconds(150));
+        anim.Completed += (_, _) =>
+        {
+            Overlay.Visibility = Visibility.Collapsed;
+            Overlay.Opacity = 1; // 复位，供下次 FadeIn 从 0 起播
+        };
+        Overlay.BeginAnimation(OpacityProperty, anim);
+    }
 
     // ---------------- 按钮事件 ----------------
 
@@ -147,7 +292,7 @@ public partial class MainWindow : Window
             var ok = await _server.EnsureServerAsync();
             if (!ok)
             {
-                ShowError("dsh 服务启动失败", _logTail.ToString().TrimEnd(), allowRetry: true);
+                ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
             WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
@@ -162,7 +307,72 @@ public partial class MainWindow : Window
         }
     }
 
-    private void LogButton_Click(object sender, RoutedEventArgs e)
+    private void LogButton_Click(object sender, RoutedEventArgs e) => OpenLog();
+
+    // ---------------- 顶栏按钮 ----------------
+
+    private void TitleBtnRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        if (WebView.CoreWebView2 is not null)
+            WebView.CoreWebView2.Reload();
+    }
+
+    private void TitleBtnBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo($"http://127.0.0.1:{_server.Port}") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开浏览器失败: {ex.Message}");
+        }
+    }
+
+    private void TitleBtnLog_Click(object sender, RoutedEventArgs e) => OpenLog();
+
+    private async void TitleBtnRestart_Click(object sender, RoutedEventArgs e)
+    {
+        TitleBtnRestart.IsEnabled = false;
+        try
+        {
+            ShowLoading();
+            _server.Shutdown();
+            var ok = await _server.EnsureServerAsync();
+            if (!ok)
+            {
+                ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
+                return;
+            }
+            WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
+        }
+        catch (Exception ex)
+        {
+            ShowError("重启失败", ex.Message, allowRetry: true);
+        }
+        finally
+        {
+            TitleBtnRestart.IsEnabled = true;
+        }
+    }
+
+    private void TitleBtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void TitleBtnMax_Click(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    }
+
+    /// <summary>最大化 ↔ 还原图标切换。</summary>
+    private void UpdateMaxButtonGlyph()
+    {
+        TitleBtnMax.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+        TitleBtnMax.ToolTip = WindowState == WindowState.Maximized ? "还原" : "最大化";
+    }
+
+    private void TitleBtnClose_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void OpenLog()
     {
         try
         {
@@ -172,6 +382,17 @@ public partial class MainWindow : Window
         {
             AppendLog($"打开日志失败: {ex.Message}");
         }
+    }
+
+    /// <summary>启动失败详情：优先展示安装指引（环境缺失时），否则回退日志摘要。</summary>
+    private string StartupFailureDetail()
+    {
+        if (!string.IsNullOrWhiteSpace(_server.StartupErrorHint))
+            return _server.StartupErrorHint;
+        var tail = _logTail.ToString().TrimEnd();
+        return string.IsNullOrWhiteSpace(tail)
+            ? "请查看日志确认 dsh 是否安装、端口是否被占用。"
+            : tail;
     }
 
     // ---------------- 日志 ----------------
@@ -191,12 +412,21 @@ public partial class MainWindow : Window
         }
         catch { /* 日志写入失败不影响主流程 */ }
 
-        // 覆盖层可见时同步展示最新日志
+        // 覆盖层可见时同步展示最新日志并滚到底
         if (Overlay.Visibility == Visibility.Visible)
+        {
             OverlayDetail.Text = _logTail.ToString().TrimEnd();
+            OverlayLogScroller.ScrollToEnd();
+        }
     }
 
     // ---------------- 生命周期 ----------------
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        _heartbeat.Stop();
+        WindowPlacementStore.Save(this);
+    }
 
     private void OnClosed(object? sender, EventArgs e)
     {
@@ -205,19 +435,146 @@ public partial class MainWindow : Window
         App.ActiveServer = null;
     }
 
-    // ---------------- DWM 深色标题栏 ----------------
+    // ---------------- DWM 窗口属性（深色 + 圆角） ----------------
+
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
 
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
         var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd != IntPtr.Zero)
-        {
-            int attr = 1;
-            _ = DwmSetWindowAttribute(hwnd, DWM_USE_IMMERSIVE_DARK_MODE, ref attr, sizeof(int));
-        }
+        if (hwnd == IntPtr.Zero) return;
+
+        int dark = 1;
+        _ = DwmSetWindowAttribute(hwnd, DWM_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+
+        // 自绘标题栏（WindowStyle=None）下恢复 Win11 原生圆角；
+        // 最大化时 DWM 自动切直角，符合 Windows 惯例。
+        int corner = DWMWCP_ROUND;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
+
+        WindowPlacementStore.Restore(this);
     }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+}
+
+/// <summary>
+/// 窗口位置/尺寸/最大化状态记忆：%LOCALAPPDATA%\dsh-app\window.json。
+/// 还原前校验与当前屏幕工作区有交集，防止拔掉外接屏后窗口开到不可见区域。
+/// </summary>
+internal static class WindowPlacementStore
+{
+    private sealed record Placement(double Left, double Top, double Width, double Height, bool IsMaximized);
+
+    private static readonly string FilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "dsh-app", "window.json");
+
+    public static void Save(Window window)
+    {
+        try
+        {
+            // 最大化时存 RestoreBounds（还原后的真实位置）
+            var bounds = window.WindowState == WindowState.Maximized
+                ? window.RestoreBounds
+                : new Rect(window.Left, window.Top, window.Width, window.Height);
+            var placement = new Placement(bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+                window.WindowState == WindowState.Maximized);
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(placement));
+        }
+        catch { /* 保存失败不影响关闭 */ }
+    }
+
+    public static void Restore(Window window)
+    {
+        Placement? placement = null;
+        try
+        {
+            if (File.Exists(FilePath))
+                placement = JsonSerializer.Deserialize<Placement>(File.ReadAllText(FilePath));
+        }
+        catch { /* 损坏的配置按首次启动处理 */ }
+        if (placement is null) return;
+
+        var rect = new Rect(placement.Left, placement.Top,
+            Math.Max(window.MinWidth, placement.Width),
+            Math.Max(window.MinHeight, placement.Height));
+
+        // 目标矩形必须与虚拟屏幕（所有显示器并集）有可见交集，否则回退默认居中
+        var virtualScreen = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+            SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+        if (!rect.IntersectsWith(virtualScreen)) return;
+
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = rect.Left;
+        window.Top = rect.Top;
+        window.Width = rect.Width;
+        window.Height = rect.Height;
+        if (placement.IsMaximized)
+            window.WindowState = WindowState.Maximized;
+    }
+}
+
+/// <summary>
+/// 覆盖层步骤行：状态图标 + 步骤名 + 详情（含耗时）。
+/// </summary>
+public sealed class StepRow : INotifyPropertyChanged
+{
+    private static readonly Brush BrushBlue = new SolidColorBrush(Color.FromRgb(0x58, 0xA6, 0xFF));
+    private static readonly Brush BrushGreen = new SolidColorBrush(Color.FromRgb(0x3F, 0xB9, 0x50));
+    private static readonly Brush BrushRed = new SolidColorBrush(Color.FromRgb(0xF8, 0x51, 0x49));
+    private static readonly Brush BrushGray = new SolidColorBrush(Color.FromRgb(0x6E, 0x76, 0x81));
+
+    private readonly Stopwatch _sw = new();
+    private StepStatus _status;
+    private string _detail = "";
+
+    public ServerStep Step { get; }
+    public string Name { get; }
+
+    public StepRow(ServerStep step, string name)
+    {
+        Step = step;
+        Name = name;
+    }
+
+    public string Icon => _status switch
+    {
+        StepStatus.Running => "⋯",
+        StepStatus.Done => "✓",
+        StepStatus.Failed => "✗",
+        _ => "○",
+    };
+
+    public Brush IconBrush => _status switch
+    {
+        StepStatus.Running => BrushBlue,
+        StepStatus.Done => BrushGreen,
+        StepStatus.Failed => BrushRed,
+        _ => BrushGray,
+    };
+
+    public string Detail => _detail;
+
+    public void Update(StepStatus status, string detail)
+    {
+        if (status == StepStatus.Running)
+            _sw.Restart();
+        else if (_sw.IsRunning)
+            detail = $"{detail} · {_sw.Elapsed.TotalSeconds:0.0}s";
+
+        _status = status;
+        _detail = detail;
+        OnPropertyChanged(nameof(Icon));
+        OnPropertyChanged(nameof(IconBrush));
+        OnPropertyChanged(nameof(Detail));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

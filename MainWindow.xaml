@@ -10,8 +10,17 @@
         MinWidth="960" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="#0D1117"
+        Icon="{x:Null}"
+        WindowStyle="None"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="36"
+                      CornerRadius="0"
+                      GlassFrameThickness="0"
+                      ResizeBorderThickness="6"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
     <Window.Resources>
         <Style x:Key="RoundedButton" TargetType="Button">
             <Setter Property="Cursor" Value="Hand" />
@@ -40,59 +49,223 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 顶栏工具按钮：纯文字，圆角 hover 深色底 -->
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="#E6EDF3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#21262D" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 顶栏系统按钮：46x36 标准尺寸，hover 深色底 -->
+        <Style x:Key="SysButton" TargetType="Button">
+            <Setter Property="Width" Value="46" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#E6EDF3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd"
+                                Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#21262D" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 关闭按钮：hover 红色（窗口标准行为） -->
+        <Style x:Key="SysButtonClose" TargetType="Button" BasedOn="{StaticResource SysButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd"
+                                Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#F85149" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
+
     <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <!-- Harness Web UI -->
-        <wv2:WebView2 x:Name="WebView" />
+        <!-- ==================== 顶栏（WindowChrome 自绘标题栏） ==================== -->
+        <Grid x:Name="TitleBar"
+              Grid.Row="0"
+              Background="#0D1117">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <!-- 状态 / 错误覆盖层 -->
-        <Grid x:Name="Overlay"
-              Panel.ZIndex="10"
-              Background="#E60D1117"
-              Visibility="Collapsed">
-            <Border Width="520"
-                    MaxWidth="560"
-                    Padding="32,28"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Background="#161B22"
-                    BorderBrush="#30363D"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                <StackPanel>
-                    <StackPanel Orientation="Horizontal">
+            <TextBlock Text="DeepSeek Harness"
+                       Margin="16,0,0,0"
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       LineHeight="20"
+                       Foreground="#E6EDF3"
+                       VerticalAlignment="Center" />
+
+            <!-- 工具按钮 -->
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        Margin="12,0,0,0">
+                <Button x:Name="TitleBtnRefresh"
+                        Content="刷新"
+                        Style="{StaticResource IconButton}"
+                        Click="TitleBtnRefresh_Click" />
+                <Button x:Name="TitleBtnBrowser"
+                        Content="浏览器"
+                        Style="{StaticResource IconButton}"
+                        Click="TitleBtnBrowser_Click" />
+                <Button x:Name="TitleBtnLog"
+                        Content="日志"
+                        Style="{StaticResource IconButton}"
+                        Click="TitleBtnLog_Click" />
+                <Button x:Name="TitleBtnRestart"
+                        Content="重启服务"
+                        Style="{StaticResource IconButton}"
+                        Click="TitleBtnRestart_Click" />
+            </StackPanel>
+
+            <!-- 系统按钮 -->
+            <StackPanel Grid.Column="3"
+                        Orientation="Horizontal">
+                <Button x:Name="TitleBtnMin"
+                        Content="─"
+                        ToolTip="最小化"
+                        Style="{StaticResource SysButton}"
+                        Click="TitleBtnMin_Click" />
+                <Button x:Name="TitleBtnMax"
+                        Content="□"
+                        ToolTip="最大化"
+                        Style="{StaticResource SysButton}"
+                        Click="TitleBtnMax_Click" />
+                <Button x:Name="TitleBtnClose"
+                        Content="✕"
+                        ToolTip="关闭"
+                        Style="{StaticResource SysButtonClose}"
+                        Click="TitleBtnClose_Click" />
+            </StackPanel>
+        </Grid>
+
+        <!-- ==================== 内容区 ==================== -->
+        <Grid Grid.Row="1">
+            <!-- Harness Web UI（初始隐藏：避免 HWND 子窗口盖住启动覆盖层，页面加载完成后再显示） -->
+            <wv2:WebView2 x:Name="WebView" Visibility="Collapsed" />
+
+            <!-- 状态 / 错误覆盖层：
+                 中央 = 品牌区（正常）或错误区（失败，替换品牌）
+                 左下 = 启动进度卡片（低调，不喧宾夺主） -->
+            <Grid x:Name="Overlay"
+                  Panel.ZIndex="10"
+                  Background="#E60D1117"
+                  Visibility="Collapsed">
+
+                <!-- 中央品牌区 -->
+                <StackPanel x:Name="CenterBrand"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="DeepSeek Harness"
+                               FontSize="40"
+                               FontWeight="SemiBold"
+                               Foreground="#E6EDF3"
+                               HorizontalAlignment="Center" />
+                    <TextBlock x:Name="CenterSubtitle"
+                               Margin="0,12,0,0"
+                               Text="正在启动…"
+                               FontSize="13"
+                               LineHeight="20"
+                               Foreground="#9DA7B3"
+                               HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <!-- 中央错误区（失败时替换品牌区） -->
+                <StackPanel x:Name="CenterError"
+                            MaxWidth="560"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Center">
                         <TextBlock x:Name="OverlayGlyph"
-                                   Text="◈"
+                                   Text="⚠"
                                    FontSize="20"
-                                   Foreground="#58A6FF"
+                                   LineHeight="28"
+                                   Foreground="Orange"
                                    VerticalAlignment="Center" />
                         <TextBlock x:Name="OverlayTitle"
                                    Margin="12,0,0,0"
-                                   Text="正在启动 DeepSeek Harness…"
+                                   Text="启动失败"
                                    FontSize="18"
                                    FontWeight="SemiBold"
+                                   LineHeight="28"
                                    Foreground="#E6EDF3"
                                    VerticalAlignment="Center" />
                     </StackPanel>
-
-                    <TextBlock x:Name="OverlayDetail"
+                    <TextBlock x:Name="OverlayErrorDetail"
                                Margin="0,14,0,0"
                                TextWrapping="Wrap"
                                LineHeight="22"
                                FontSize="13"
-                               Foreground="#9DA7B3" />
-
-                    <ProgressBar x:Name="OverlayProgress"
-                                 Margin="0,18,0,0"
-                                 Height="4"
-                                 IsIndeterminate="True"
-                                 Foreground="#58A6FF"
-                                 Background="#21262D" />
-
+                               Foreground="#9DA7B3"
+                               TextAlignment="Center" />
                     <StackPanel x:Name="OverlayActions"
                                 Orientation="Horizontal"
                                 Margin="0,20,0,0"
+                                HorizontalAlignment="Center"
                                 Visibility="Collapsed">
                         <Button x:Name="RetryButton"
                                 Content="重试"
@@ -113,15 +286,83 @@
                                 BorderBrush="#30363D"
                                 BorderThickness="1" />
                     </StackPanel>
-
-                    <TextBlock x:Name="OverlayVersion"
-                               Margin="0,24,0,0"
-                               Text="dsh-app v1.0 · DeepSeek Harness 桌面壳"
-                               FontSize="11"
-                               Foreground="#6E7681" />
                 </StackPanel>
-            </Border>
-        </Grid>
 
+                <!-- 左下角启动进度卡片（半透明，不喧宾夺主） -->
+                <Border Width="400"
+                        Margin="20,0,0,20"
+                        Padding="20,16"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Bottom"
+                        Background="#E6161B22"
+                        BorderBrush="#30363D"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                    <StackPanel>
+                        <TextBlock Text="启动进度"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   LineHeight="20"
+                                   Foreground="#E6EDF3"
+                                   Margin="0,0,0,8" />
+                        <ItemsControl x:Name="StepList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="18" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Icon}"
+                                                   FontSize="13"
+                                                   LineHeight="20"
+                                                   Foreground="{Binding IconBrush}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Name}"
+                                                   Margin="10,0,0,0"
+                                                   FontSize="13"
+                                                   LineHeight="20"
+                                                   Foreground="#E6EDF3" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Detail}"
+                                                   Margin="12,0,0,0"
+                                                   FontSize="12"
+                                                   LineHeight="20"
+                                                   Foreground="#9DA7B3"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <ProgressBar x:Name="OverlayProgress"
+                                     Margin="0,10,0,0"
+                                     Height="3"
+                                     IsIndeterminate="True"
+                                     Foreground="#58A6FF"
+                                     Background="#21262D" />
+
+                        <!-- 实时日志（压缩滚动区） -->
+                        <ScrollViewer x:Name="OverlayLogScroller"
+                                      MaxHeight="88"
+                                      Margin="0,10,0,0"
+                                      VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="OverlayDetail"
+                                       TextWrapping="Wrap"
+                                       LineHeight="16"
+                                       FontSize="11"
+                                       Foreground="#9DA7B3" />
+                        </ScrollViewer>
+
+                        <TextBlock Text="dsh-app v1.0 · DeepSeek Harness 桌面壳"
+                                   Margin="0,8,0,0"
+                                   FontSize="11"
+                                   LineHeight="16"
+                                   Foreground="#6E7681" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
     </Grid>
 </Window>
