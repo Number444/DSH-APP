@@ -31,8 +31,6 @@ public partial class MainWindow : Window
     private readonly ServerController _server = new();
     private readonly HarnessUpdater _updater = new();
     private readonly BalanceMonitor _balance = new();
-    private readonly StringBuilder _logTail = new();
-    private readonly string _logFilePath;
     private readonly ObservableCollection<StepRow> _steps = new();
     private readonly DispatcherTimer _heartbeat;
     private int _heartbeatMisses;
@@ -62,16 +60,16 @@ public partial class MainWindow : Window
     // 检测不到"外部点击"（托盘场景 Popup 捕获还可能被托盘交互抢占）→ 用 WH_MOUSE_LL 全局兜底。
     private IntPtr _mouseHook;
     private LowLevelMouseProc? _mouseHookProc;
+    /// <summary>托盘菜单打开时记录的托盘图标位置（物理像素；作锚点命中判定）。</summary>
+    private Point? _trayIconScreenPos;
+    /// <summary>托盘图标是否挂载成功（失败时关窗不得走"最小化到托盘"）。</summary>
+    private bool _trayAvailable;
+    /// <summary>钩子热路径遍历的菜单集合（static 避免每次点击分配数组）。</summary>
+    private static readonly Popup[] MenuPopups = new Popup[3];
 
     public MainWindow()
     {
         InitializeComponent();
-
-        var logDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "dsh-app");
-        Directory.CreateDirectory(logDir);
-        _logFilePath = Path.Combine(logDir, "app.log");
 
         _server.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
         _server.StepChanged += (step, status, detail) => Dispatcher.Invoke(() => UpdateStep(step, status, detail));
@@ -256,18 +254,26 @@ public partial class MainWindow : Window
 
     private async void OnHeartbeatTick(object? sender, EventArgs e)
     {
-        var alive = await _server.CheckAliveAsync();
-        if (alive)
+        try
         {
-            _heartbeatMisses = 0;
-            return;
-        }
-        _heartbeatMisses++;
-        if (_heartbeatMisses < 2) return; // 连续 2 次失败才判定死亡，避免单次抖动误报
+            var alive = await _server.CheckAliveAsync();
+            if (alive)
+            {
+                _heartbeatMisses = 0;
+                return;
+            }
+            _heartbeatMisses++;
+            if (_heartbeatMisses < 2) return; // 连续 2 次失败才判定死亡，避免单次抖动误报
 
-        _heartbeat.Stop();
-        AppendLog("心跳检测：dsh 服务已停止响应");
-        ShowServiceLostError("dsh 服务已停止响应（可能已被外部关闭）。");
+            _heartbeat.Stop();
+            AppendLog("心跳检测：dsh 服务已停止响应");
+            ShowServiceLostError("dsh 服务已停止响应（可能已被外部关闭）。");
+        }
+        catch (Exception ex)
+        {
+            // async void 零防护点：单次心跳异常不得击穿全局异常兜底
+            AppendLog($"心跳检测异常：{ex.Message}");
+        }
     }
 
     /// <summary>服务丢失统一入口：收起 WebView（airspace，WPF 覆盖层盖不住 HWND）再显示错误卡。</summary>
@@ -302,9 +308,10 @@ public partial class MainWindow : Window
         CenterSubtitle.Text = "正在启动 DeepSeek Harness…";
         CenterError.Visibility = Visibility.Collapsed;
         OverlayProgress.Visibility = Visibility.Visible;
-        OverlayDetail.Text = string.IsNullOrWhiteSpace(_logTail.ToString())
+        var tail = FileLog.TailText;
+        OverlayDetail.Text = string.IsNullOrWhiteSpace(tail)
             ? "正在拉起 dsh web 服务并等待就绪，首次启动可能需要 10~20 秒…"
-            : _logTail.ToString().TrimEnd();
+            : tail.TrimEnd();
         OverlayLogScroller.ScrollToEnd();
     }
 
@@ -460,14 +467,24 @@ public partial class MainWindow : Window
                 // 余额菜单"刷新余额"：状态卡先显示"刷新中"，结果由 BalanceChanged 回调更新
                 _userRefreshPending = true;
                 ShowBalanceStatus("正在刷新余额…");
-                var requested = await _balance.RefreshAsync();
-                if (!requested)
+                var result = await _balance.RefreshAsync();
+                if (result == BalanceMonitor.RefreshResult.Debounced ||
+                    result == BalanceMonitor.RefreshResult.Stopped)
                 {
-                    // 防抖/防重入忽略：无回调会来，直接提示并复位
+                    // 防抖/已停止：无在途请求，回调不会来——复位 pending 并提示
                     _userRefreshPending = false;
-                    ShowBalanceStatus("操作太频繁，请稍后再试",
+                    ShowBalanceStatus(result == BalanceMonitor.RefreshResult.Stopped
+                        ? "余额监控未运行"
+                        : "操作太频繁，请稍后再试",
                         (Brush)FindResource("AccentOrangeBrush"));
                 }
+                else if (result == BalanceMonitor.RefreshResult.InFlight)
+                {
+                    // 轮询/上次请求在途：结果仍会经回调到达，不触碰 pending
+                    ShowBalanceStatus("正在获取中…",
+                        (Brush)FindResource("AccentOrangeBrush"));
+                }
+                // Started：等回调更新状态卡
                 break;
             case "topup":
                 OpenTopUpPage();
@@ -524,6 +541,7 @@ public partial class MainWindow : Window
             if (icon is null) return;
             TrayIcon.Icon = icon;
             TrayIcon.Visibility = Visibility.Visible;
+            _trayAvailable = true;
             TrayIcon.TrayMouseDoubleClick += (_, _) => ShowMainWindow();
             // 右键弹菜单（与 APP 内同款 Popup 菜单；不设 ContextMenu，避免系统样式/动画差异）。
             // 用 Up 而非 Down：按下时打开会让同一交互序列的弹起被 Popup 当作"外部点击"而立即关闭（闪烁）。
@@ -549,14 +567,32 @@ public partial class MainWindow : Window
 
         UpdateTrayMenuItems();
         GetCursorPos(out var pt); // 物理像素
-        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        double x = pt.X / dpi;
-        double y = pt.Y / dpi;
-        var work = SystemParameters.WorkArea;
+        _trayIconScreenPos = new Point(pt.X, pt.Y); // 记录锚点（钩子命中判定用）
 
-        // 菜单估算尺寸（4 项 × 32 + 8 padding ≈ 136；留余量防超界）
-        const double menuW = 228;
-        const double menuH = 148;
+        // 光标所在显示器的工作区与 DPI（多显示器混合 DPI 下不能用主窗口/主屏换算）
+        var monitor = MonitorFromPoint(new NativePoint { X = pt.X, Y = pt.Y }, MONITOR_DEFAULTTONEAREST);
+        double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var work = SystemParameters.WorkArea; // DIP，fallback
+        if (monitor != IntPtr.Zero)
+        {
+            var mi = new MonitorInfo { cbSize = Marshal.SizeOf<MonitorInfo>() };
+            if (GetMonitorInfo(monitor, ref mi))
+            {
+                var rc = mi.rcWork; // 物理像素
+                if (GetDpiForMonitor(monitor, 0, out var dpiX, out _) == 0)
+                    scale = dpiX / 96.0;
+                work = new Rect(rc.Left / scale, rc.Top / scale, (rc.Right - rc.Left) / scale, (rc.Bottom - rc.Top) / scale);
+            }
+        }
+
+        double x = pt.X / scale;
+        double y = pt.Y / scale;
+
+        // 菜单实际尺寸（Measure 实量，长文本项不会导致翻转判定失真）
+        TrayMenu.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double menuW = Math.Max(220, TrayMenu.DesiredSize.Width);
+        double menuH = TrayMenu.DesiredSize.Height;
+
         // 默认在鼠标右下方展开（紧贴）；右/下放不下则反向（图标在任务栏底部时菜单自然落在图标正上方）
         double offsetX = x + 4;
         if (offsetX + menuW > work.Right)
@@ -602,6 +638,9 @@ public partial class MainWindow : Window
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
+    [DllImport("shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
     /// <summary>菜单 Popup 打开时安装全局鼠标钩子（幂等）。</summary>
     private void InstallDismissHook()
     {
@@ -622,43 +661,96 @@ public partial class MainWindow : Window
         _mouseHookProc = null;
     }
 
-    /// <summary>任意鼠标按下：若点击落在打开的菜单矩形外 → 关闭（经 Dispatcher 上 UI 线程）。</summary>
+    /// <summary>
+    /// 任意鼠标按下：点击落在打开的菜单矩形外 → 关闭；落在菜单锚点（触发按钮/托盘图标）上 → 跳过，
+    /// 让按钮自身的 Click/toggle 语义生效（否则"按下时钩子关闭 + 弹起时 Click 重开"竞态导致菜单永远关不掉）。
+    /// 全程物理像素比较（PointToScreen 与 GetCursorPos 同系），混合 DPI 下不偏移。
+    /// </summary>
     private IntPtr OnLowLevelMouse(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0)
+        try
         {
-            int msg = wParam.ToInt32();
-            if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+            if (nCode >= 0)
             {
-                var info = Marshal.PtrToStructure<MsllHookStruct>(lParam);
-                Dispatcher.BeginInvoke(() =>
+                int msg = wParam.ToInt32();
+                if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
-                    var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-                    var pt = new Point(info.X / dpi, info.Y / dpi);
-                    foreach (var popup in new[] { MenuPopup, BalanceMenuPopup, TrayMenuPopup })
+                    var info = Marshal.PtrToStructure<MsllHookStruct>(lParam);
+                    var pt = new Point(info.X, info.Y); // 物理像素
+                    Dispatcher.BeginInvoke(() =>
                     {
-                        if (!popup.IsOpen) continue;
-                        var rect = GetPopupScreenRect(popup);
-                        if (!rect.IsEmpty && !rect.Contains(pt))
-                            popup.IsOpen = false;
-                    }
-                    UninstallDismissHookIfIdle();
-                });
+                        try
+                        {
+                            MenuPopups[0] = MenuPopup;
+                            MenuPopups[1] = BalanceMenuPopup;
+                            MenuPopups[2] = TrayMenuPopup;
+                            foreach (var popup in MenuPopups)
+                            {
+                                if (!popup.IsOpen) continue;
+                                if (IsAnchorHit(popup, pt)) continue; // 锚点命中：交给按钮 toggle
+                                var rect = GetPopupScreenRect(popup);
+                                if (!rect.IsEmpty && !rect.Contains(pt))
+                                    popup.IsOpen = false;
+                            }
+                            UninstallDismissHookIfIdle();
+                        }
+                        catch
+                        {
+                            // 关闭期 Dispatcher 异常等：忽略（菜单关闭是尽力而为）
+                        }
+                    });
+                }
             }
+            return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
         }
-        return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+        catch
+        {
+            // 钩子回调在系统钩子线程：任何托管异常逃逸都会终止进程，必须兜住
+            return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+        }
     }
 
-    /// <summary>Popup 内容在屏幕上的矩形（DIP；Popup 是独立 HWND，Child.PointToScreen 即为屏幕坐标）。</summary>
+    /// <summary>点击是否落在菜单锚点（触发按钮/托盘图标）上——命中则不关闭该菜单。</summary>
+    private bool IsAnchorHit(Popup popup, Point physPt)
+    {
+        try
+        {
+            if (popup == MenuPopup)
+                return IsPointInElementScreenRect(TitleBtnMenu, physPt);
+            if (popup == BalanceMenuPopup)
+                return IsPointInElementScreenRect(TitleBalance, physPt);
+            if (popup == TrayMenuPopup)
+                return _trayIconScreenPos is Point p &&
+                       Math.Abs(physPt.X - p.X) < 32 &&
+                       Math.Abs(physPt.Y - p.Y) < 32;
+        }
+        catch
+        {
+            // 命中判定失败按"未命中"处理（菜单可被外部点击关闭，无碍）
+        }
+        return false;
+    }
+
+    /// <summary>物理像素点是否落在元素屏幕矩形内。</summary>
+    private static bool IsPointInElementScreenRect(FrameworkElement element, Point physPt)
+    {
+        if (element.Visibility != Visibility.Visible) return false;
+        var dpi = VisualTreeHelper.GetDpi(element).PixelsPerDip;
+        var topLeft = element.PointToScreen(new Point(0, 0)); // 物理像素
+        var rect = new Rect(topLeft.X, topLeft.Y, element.ActualWidth * dpi, element.ActualHeight * dpi);
+        return rect.Contains(physPt);
+    }
+
+    /// <summary>Popup 内容在屏幕上的矩形（物理像素；Popup 是独立 HWND，Child.PointToScreen 即为屏幕坐标）。</summary>
     private static Rect GetPopupScreenRect(Popup popup)
     {
         if (!popup.IsOpen || popup.Child is not FrameworkElement child)
             return Rect.Empty;
         try
         {
-            var topLeft = child.PointToScreen(new Point(0, 0));
-            var dpi = VisualTreeHelper.GetDpi(popup).PixelsPerDip;
-            return new Rect(topLeft.X / dpi, topLeft.Y / dpi, child.ActualWidth, child.ActualHeight);
+            var topLeft = child.PointToScreen(new Point(0, 0)); // 物理像素
+            var dpi = VisualTreeHelper.GetDpi(child).PixelsPerDip;
+            return new Rect(topLeft.X, topLeft.Y, child.ActualWidth * dpi, child.ActualHeight * dpi);
         }
         catch
         {
@@ -724,6 +816,12 @@ public partial class MainWindow : Window
                         : $"已是最新版本（v{_updater.LocalVersion}）。",
                     "知道了", glyph: "ℹ") { Owner = this }.ShowDialog();
             }
+        }
+        catch (Exception ex)
+        {
+            // fire-and-forget 入口：检查期间退出（HarnessUpdater.Dispose 释放管道流）会抛
+            // ObjectDisposedException——必须在此兜住，否则直达 DispatcherUnhandledException 崩溃
+            AppendLog($"检查更新异常：{ex.Message}");
         }
         finally
         {
@@ -882,8 +980,8 @@ public partial class MainWindow : Window
         if (text is null)
         {
             TitleBalanceText.Text = "—";
-            // 失败/无值：回退按钮默认弱色（继承自 IconButton 样式的 TextWeakBrush）
-            TitleBalanceText.ClearValue(TextBlock.ForegroundProperty);
+            // 失败/无值：显式弱色（SetResourceReference = DynamicResource 语义，主题切换即时跟随）
+            TitleBalanceText.SetResourceReference(TextBlock.ForegroundProperty, "TextWeakBrush");
             TitleBalance.ToolTip = _balance.LastError is null
                 ? "余额获取失败（点击重试）"
                 : $"余额获取失败：{_balance.LastError}（点击重试）";
@@ -898,15 +996,14 @@ public partial class MainWindow : Window
         {
             TitleBalanceText.Text = $"¥ {text}";
             TitleBalance.ToolTip = _balance.DetailText + "\n左键菜单：刷新 / 充值";
-            // 余额状态色（规范见 docs/UI-GUIDELINES.md §4.1）：常驻公共蓝；<¥5 告警黄；<¥2 危险红
+            // 余额状态色（规范见 docs/UI-GUIDELINES.md §4.1）：常驻公共蓝；<¥5 告警黄；<¥2 危险红。
+            // SetResourceReference = DynamicResource：主题切换即时跟随（R8），不残留旧主题色
             if (_balance.LastBalance is decimal amount)
             {
-                if (amount < BalanceDangerThreshold)
-                    TitleBalanceText.Foreground = (Brush)FindResource("AccentRedBrush");
-                else if (amount < BalanceWarnThreshold)
-                    TitleBalanceText.Foreground = (Brush)FindResource("BalanceAlertBrush");
-                else
-                    TitleBalanceText.Foreground = (Brush)FindResource("AccentBlueBrush");
+                TitleBalanceText.SetResourceReference(TextBlock.ForegroundProperty,
+                    amount < BalanceDangerThreshold ? "AccentRedBrush"
+                    : amount < BalanceWarnThreshold ? "BalanceAlertBrush"
+                    : "AccentBlueBrush");
             }
             if (_userRefreshPending)
             {
@@ -937,8 +1034,10 @@ public partial class MainWindow : Window
 
         _wasAboveThreshold = false;
         AppendLog($"余额告警：¥{amount:0.00} 低于阈值 ¥{threshold:0.00}");
-        ShowBalanceStatus($"⚠ 余额不足：¥{amount:0.00}（低于 ¥{threshold:0.00}）",
-            (Brush)FindResource("AccentOrangeBrush"), stayMs: 4000);
+        // 窗口隐藏（托盘化/最小化）时不弹状态卡（孤悬屏幕），只走托盘气泡
+        if (IsVisible)
+            ShowBalanceStatus($"⚠ 余额不足：¥{amount:0.00}（低于 ¥{threshold:0.00}）",
+                (Brush)FindResource("AccentOrangeBrush"), stayMs: 4000);
         try
         {
             TrayIcon.ShowBalloonTip("DeepSeek 余额不足",
@@ -953,13 +1052,32 @@ public partial class MainWindow : Window
 
     /// <summary>右键余额交互已删除（v1.2.1）：左键菜单内含刷新/充值；此注释占位防误加回。</summary>
 
-    /// <summary>在余额按钮下方显示状态卡（自动关闭；序号防连续点击竞态）。</summary>
+    /// <summary>在余额按钮下方显示状态卡（自动关闭；序号防连续点击竞态；水平超屏左移钳位）。</summary>
     private async void ShowBalanceStatus(string text, Brush? brush = null, int stayMs = 2200)
     {
         var seq = ++_statusSeq;
         BalanceStatusText.Text = text;
         BalanceStatusText.Foreground = brush ?? (Brush)FindResource("TextSecondaryBrush");
+        // 与余额菜单同锚点：先关菜单防叠显；水平偏移复位（上次钳位可能留负值）
+        BalanceMenuPopup.IsOpen = false;
+        BalanceStatusPopup.HorizontalOffset = 0;
         BalanceStatusPopup.IsOpen = true;
+        // 水平钳位：状态卡右缘超工作区则左移（余额按钮右侧紧邻系统按钮区，文本可能溢出）
+        if (BalanceStatusPopup.Child is FrameworkElement child)
+        {
+            try
+            {
+                var tl = child.PointToScreen(new Point(0, 0));
+                var dpi = VisualTreeHelper.GetDpi(child).PixelsPerDip;
+                var right = tl.X + child.ActualWidth * dpi;
+                var workRight = SystemParameters.WorkArea.Right * dpi; // 主屏近似（状态卡短生命周期，可接受）
+                if (right > workRight)
+                {
+                    BalanceStatusPopup.HorizontalOffset = -((right - workRight) / dpi) - 4;
+                }
+            }
+            catch { /* 钳位失败不影响显示 */ }
+        }
         await Task.Delay(stayMs);
         if (seq == _statusSeq)
             BalanceStatusPopup.IsOpen = false;
@@ -976,25 +1094,33 @@ public partial class MainWindow : Window
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
     }
 
-    private void TitleBalance_Click(object sender, RoutedEventArgs e)
+    /// <summary>弹起复位：按下后拖出按钮再松开不触发 Click，若不复位会永久卡在 0.94 缩放。</summary>
+    private void TitleBalance_PreviewMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (TitleBalance.Visibility != Visibility.Visible) return;
-        // 弹回动效（BackEase 轻微过冲，模拟弹性按键）
+        if (e.ChangedButton != MouseButton.Left) return;
         if (TitleBalance.RenderTransform is ScaleTransform scale)
         {
-            var pop = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(260))
+            var pop = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(200))
             {
-                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.5 },
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 },
             };
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
         }
+    }
 
-        // 左键：打开/关闭余额菜单（刷新 / 充值在菜单内；点击外部或菜单项自动关闭）
+    private void TitleBalance_Click(object sender, RoutedEventArgs e)
+    {
+        if (TitleBalance.Visibility != Visibility.Visible) return;
+        // 弹回动效已在 PreviewMouseUp 统一处理（含按下拖出场景）；此处只做菜单开关
         BalanceMenuPopup.IsOpen = !BalanceMenuPopup.IsOpen;
     }
 
-    private void TitleBtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+    private void TitleBtnMin_Click(object sender, RoutedEventArgs e)
+    {
+        CloseAllMenus(); // 最小化时菜单 Popup（独立 HWND）与钩子一并清理
+        WindowState = WindowState.Minimized;
+    }
 
     private void TitleBtnMax_Click(object sender, RoutedEventArgs e)
     {
@@ -1017,7 +1143,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("notepad.exe", _logFilePath) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo("notepad.exe", FileLog.LogFilePath) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -1030,7 +1156,7 @@ public partial class MainWindow : Window
     {
         if (!string.IsNullOrWhiteSpace(_server.StartupErrorHint))
             return _server.StartupErrorHint;
-        var tail = _logTail.ToString().TrimEnd();
+        var tail = FileLog.TailText.TrimEnd();
         return string.IsNullOrWhiteSpace(tail)
             ? "请查看日志确认 dsh 是否安装、端口是否被占用。"
             : tail;
@@ -1038,27 +1164,29 @@ public partial class MainWindow : Window
 
     // ---------------- 日志 ----------------
 
+    /// <summary>覆盖层日志刷新 pending 标志（合并多次 AppendLog 为一次重设，避免每行重排）。</summary>
+    private bool _overlayLogDirty;
+
     private void AppendLog(string message)
     {
-        _logTail.AppendLine(message);
-        if (_logTail.Length > 8_000)
-            _logTail.Remove(0, _logTail.Length - 8_000);
+        FileLog.Append(message); // 内存尾缓冲 + 后台异步落盘（UI 线程零磁盘 IO）
 
-        try
-        {
-            var utf8Bom = new UTF8Encoding(true);
-            if (!File.Exists(_logFilePath))
-                File.WriteAllText(_logFilePath, "", utf8Bom);
-            File.AppendAllText(_logFilePath, message + Environment.NewLine, utf8Bom);
-        }
-        catch { /* 日志写入失败不影响主流程 */ }
-
-        // 覆盖层可见时同步展示最新日志并滚到底
+        // 覆盖层可见时同步展示最新日志并滚到底（节流：合并到 Background 优先级）
         if (Overlay.Visibility == Visibility.Visible)
+            ScheduleOverlayLogRefresh();
+    }
+
+    private void ScheduleOverlayLogRefresh()
+    {
+        if (_overlayLogDirty) return;
+        _overlayLogDirty = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
-            OverlayDetail.Text = _logTail.ToString().TrimEnd();
+            _overlayLogDirty = false;
+            if (Overlay.Visibility != Visibility.Visible) return;
+            OverlayDetail.Text = FileLog.TailText.TrimEnd();
             OverlayLogScroller.ScrollToEnd();
-        }
+        });
     }
 
     // ---------------- 生命周期 ----------------
@@ -1085,11 +1213,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 未处理异常兜底：App 已请求强制退出，任何拦截都必须放行
+        if (App.ForceExit)
+        {
+            CloseAllMenus();
+            return;
+        }
+
         // 最小化到托盘：隐藏窗口，服务继续运行（托盘菜单"退出"、设置关闭该行为、
-        // 或更新中断确认后（_abortUpdateConfirmed）才真正退出）
-        if (AppSettings.Current.MinimizeToTrayOnClose && !_trayExitRequested && !_abortUpdateConfirmed)
+        // 更新中断确认后（_abortUpdateConfirmed）或托盘不可用（_trayAvailable=false）才真正退出）
+        if (AppSettings.Current.MinimizeToTrayOnClose && !_trayExitRequested && !_abortUpdateConfirmed && _trayAvailable)
         {
             e.Cancel = true;
+            CloseAllMenus(); // Popup 是独立 HWND：不关则残留屏幕，钩子也保持常驻
             Hide();
             if (!_trayHintShown)
             {
@@ -1109,6 +1245,16 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>关闭全部菜单 Popup 与余额状态卡（隐藏/退出/强制退出时调用，触发 Closed 自然卸钩）。</summary>
+    private void CloseAllMenus()
+    {
+        MenuPopup.IsOpen = false;
+        BalanceMenuPopup.IsOpen = false;
+        TrayMenuPopup.IsOpen = false;
+        BalanceStatusPopup.IsOpen = false;
+        UninstallDismissHookIfIdle();
+    }
+
     private void OnClosed(object? sender, EventArgs e)
     {
         _server.Shutdown();
@@ -1117,6 +1263,11 @@ public partial class MainWindow : Window
         _balance.Dispose();
         _updater.Dispose();
         App.ActiveServer = null;
+        try
+        {
+            TrayIcon.Dispose(); // Hardcodet 资源（原生图标/隐藏窗口）随窗口显式释放
+        }
+        catch { /* 忽略 */ }
     }
 
     // ---------------- DWM 窗口属性（深色 + 圆角） ----------------
@@ -1186,6 +1337,9 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, int dwFlags);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(NativePoint pt, int dwFlags);
+
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
 
@@ -1199,6 +1353,13 @@ public partial class MainWindow : Window
     /// </summary>
     private IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        // 第二实例激活请求（App.ActivateExistingWindow 经 PostMessage 送达）：走 WPF 状态机恢复窗口
+        if (App.WmDshActivate != 0 && msg == App.WmDshActivate)
+        {
+            Dispatcher.BeginInvoke(ShowMainWindow);
+            return IntPtr.Zero;
+        }
+
         if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
 
         var monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);

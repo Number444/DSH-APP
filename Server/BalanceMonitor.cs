@@ -101,36 +101,49 @@ public sealed class BalanceMonitor : IDisposable
         Stop();
     }
 
+    /// <summary>刷新请求结果：Started=已实际发起（结果经回调）；其余为被忽略及原因。</summary>
+    public enum RefreshResult
+    {
+        Started,
+        /// <summary>距上次请求不足 2s（防抖，无在途请求）。</summary>
+        Debounced,
+        /// <summary>已有在途请求（如 60s 轮询正占通道），其结果仍会经回调到达。</summary>
+        InFlight,
+        /// <summary>监控已停止。</summary>
+        Stopped,
+    }
+
     /// <summary>
-    /// 手动刷新（余额文本点击触发）。返回 true = 实际发起请求（结果经 BalanceChanged 回调）；
-    /// false = 被防抖（距上次请求 &lt;2s）/ 防重入（在途请求）/ 已停止 忽略，调用方据此提示用户。
+    /// 手动刷新（余额菜单触发）。返回 Started = 已实际发起请求（结果经 BalanceChanged 回调）；
+    /// Debounced/InFlight/Stopped = 被忽略及原因，调用方据此提示（区分"在途"与"防抖"，
+    /// 避免轮询占通道时误报"操作太频繁"）。
     /// </summary>
-    public async Task<bool> RefreshAsync()
+    public async Task<RefreshResult> RefreshAsync()
     {
         if (Volatile.Read(ref _stopped))
-            return false;
+            return RefreshResult.Stopped;
 
         // 防抖：距上次请求不足 2s 忽略（CAS 抢占，并发调用仅一个进入）
         var now = DateTime.UtcNow.Ticks;
         var previous = Interlocked.Read(ref _lastRequestTicks);
         if (now - previous < DebounceTicks)
-            return false;
+            return RefreshResult.Debounced;
         if (Interlocked.CompareExchange(ref _lastRequestTicks, now, previous) != previous)
-            return false;
+            return RefreshResult.Debounced;
 
-        // 防重入：已有在途请求则忽略
+        // 防重入：已有在途请求则忽略（其结果仍会到来，非防抖）
         if (Interlocked.Exchange(ref _refreshing, 1) != 0)
-            return false;
+            return RefreshResult.InFlight;
 
         try
         {
             await RefreshCoreAsync().ConfigureAwait(false);
-            return true; // 请求已实际发起（结果由回调体现）
+            return RefreshResult.Started; // 请求已实际发起（结果由回调体现）
         }
         catch
         {
-            // 兜底：轮询由 Timer 驱动，未预期异常不得外泄（也不记录，红线）；请求已发起，仍按 true 计
-            return true;
+            // 兜底：轮询由 Timer 驱动，未预期异常不得外泄（也不记录，红线）；请求已发起，仍按 Started 计
+            return RefreshResult.Started;
         }
         finally
         {
@@ -384,14 +397,38 @@ public sealed class BalanceMonitor : IDisposable
         return decimal.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
-    /// <summary>在 UI 线程执行；无 UI 上下文（Application.Current 为 null）或已在 UI 线程时直接执行。</summary>
+    /// <summary>
+    /// 在 UI 线程执行；无 UI 上下文（Application.Current 为 null）或已在 UI 线程时直接执行。
+    /// 应用退出（Dispatcher 关闭）期间：InvokeAsync 会抛 TaskCanceledException/InvalidOperationException
+    /// ——回调内容本身又检查 _stopped（Stop/Dispose 后忽略），关闭期派发异常就地吞掉即可。
+    /// </summary>
     private static void Dispatch(Action action)
     {
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
+        {
             action();
-        else
-            dispatcher.Invoke(action);
+            return;
+        }
+        try
+        {
+            // 异步派发：不阻塞线程池延续（60s 轮询路径下避免占用线程池线程等待 UI）
+            dispatcher.BeginInvoke(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch
+                {
+                    // 窗口销毁/关闭期回调异常：忽略（不击穿全局异常兜底）
+                }
+            });
+        }
+        catch
+        {
+            // 关闭期派发失败：无 UI 可更新，忽略
+        }
     }
 
     // ---- 结果模型 ----

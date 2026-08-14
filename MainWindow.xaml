@@ -82,6 +82,7 @@
                         Foreground="{DynamicResource TextWeakBrush}"
                         WindowChrome.IsHitTestVisibleInChrome="True"
                         PreviewMouseLeftButtonDown="TitleBalance_PreviewMouseDown"
+                        PreviewMouseLeftButtonUp="TitleBalance_PreviewMouseUp"
                         Click="TitleBalance_Click"
                         Visibility="Collapsed">
                     <TextBlock x:Name="TitleBalanceText"
@@ -118,7 +119,7 @@
                 <views:AppMenuPanel x:Name="TopMenu" />
             </Popup>
 
-            <!-- 余额右键菜单：点击"打开充值页"才跳转（右键余额不再直接跳转） -->
+            <!-- 余额左键菜单：刷新余额 / 打开充值页（右键交互已删除；点击外部自动关闭） -->
             <Popup x:Name="BalanceMenuPopup"
                    Placement="Bottom"
                    PlacementTarget="{Binding ElementName=TitleBalance}"

@@ -203,7 +203,7 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>失焦即保存（DPAPI 加密），输入框清空防明文残留。</summary>
+    /// <summary>失焦即保存（DPAPI 加密），输入框清空防明文残留；加密失败必须如实提示。</summary>
     private void ApiKeyBox_LostFocus(object sender, RoutedEventArgs e)
     {
         var key = ApiKeyBox.Password.Trim();
@@ -213,7 +213,14 @@ public partial class SettingsWindow : Window
             AppSettings.Current.Save();
             return;
         }
-        AppSettings.Current.EncryptedApiKey = DpapiHelper.Encrypt(key);
+        var encrypted = DpapiHelper.Encrypt(key);
+        if (encrypted is null)
+        {
+            // 加密失败：不落盘、不覆盖原密文、不清空输入，明确提示（不得假装"已保存"）
+            ApiKeyHint.Text = "加密失败，未保存。请重试（或检查系统凭据服务）。";
+            return;
+        }
+        AppSettings.Current.EncryptedApiKey = encrypted;
         AppSettings.Current.Save();
         ApiKeyBox.Clear();
         ApiKeyHint.Text = "已保存（DPAPI 加密存储）。";

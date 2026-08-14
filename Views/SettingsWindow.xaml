@@ -183,7 +183,7 @@
                          BorderThickness="1"
                          LostFocus="ThresholdBox_LostFocus" />
             </StackPanel>
-            <TextBlock Text="余额跌破阈值时弹出系统通知，点击通知直达充值页（右击余额也可充值）。"
+            <TextBlock Text="余额跌破阈值时弹出系统通知，点击通知直达充值页。"
                        Margin="0,6,0,0"
                        FontSize="11"
                        Foreground="{DynamicResource TextWeakBrush}"

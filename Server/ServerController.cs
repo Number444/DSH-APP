@@ -38,6 +38,8 @@ public sealed class ServerController : IDisposable
     private bool _disposed;
     /// <summary>服务已就绪（EnsureServerAsync 成功）标志，用于区分启动中退出与运行中崩溃。</summary>
     private volatile bool _ready;
+    /// <summary>EnsureServerAsync 串行化：启动期间点"重启/重试"不得并发二次拉起（防双进程、句柄覆盖）。</summary>
+    private readonly SemaphoreSlim _ensureLock = new(1, 1);
 
     /// <summary>接管的外部 dsh 进程 PID（0 = 无接管）。</summary>
     private int _adoptedPid;
@@ -75,9 +77,30 @@ public sealed class ServerController : IDisposable
 
     /// <summary>
     /// 确保 dsh 服务可用：已在运行则直连；否则隐藏窗口拉起 `dsh web` 并轮询就绪。
-    /// 全程异步，不阻塞调用线程（UI 线程）。
+    /// 全程异步，不阻塞调用线程（UI 线程）。SemaphoreSlim 串行化防重入
+    /// （启动期间"重启/重试"会等待而非并发拉起）；Dispose 后拒绝启动。
     /// </summary>
     public async Task<bool> EnsureServerAsync()
+    {
+        if (_disposed)
+        {
+            WriteLog("ServerController 已释放，拒绝启动服务");
+            return false;
+        }
+
+        await _ensureLock.WaitAsync();
+        try
+        {
+            if (_disposed) return false;
+            return await EnsureServerCoreAsync();
+        }
+        finally
+        {
+            _ensureLock.Release();
+        }
+    }
+
+    private async Task<bool> EnsureServerCoreAsync()
     {
         StartupErrorHint = null;
         _ready = false;
@@ -240,6 +263,14 @@ public sealed class ServerController : IDisposable
     {
         try
         {
+            // 覆盖引用前先释放旧的（防重入路径残留句柄/事件；正常路径 Shutdown 已清理，此处幂等）
+            var old = _serverProcess;
+            if (old is not null && !old.HasExited)
+            {
+                try { old.Kill(); } catch { /* 忽略 */ }
+                try { old.Dispose(); } catch { /* 忽略 */ }
+            }
+
             var logDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "dsh-app");
@@ -383,7 +414,8 @@ public sealed class ServerController : IDisposable
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}");
-            using var resp = await _http.SendAsync(req);
+            // 只需响应头即知端口上有 HTTP 服务：不下载响应体（探测/心跳频率下避免无谓流量与慢体误判）
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
             // 2xx/3xx/4xx 都说明端口上有 HTTP 服务在监听
             return (int)resp.StatusCode < 500;
         }
@@ -475,5 +507,6 @@ public sealed class ServerController : IDisposable
         _http.Dispose();
         _serverProcess?.Dispose();
         _serverProcess = null;
+        _ensureLock.Dispose();
     }
 }
