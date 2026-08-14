@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -15,7 +16,6 @@ public partial class App : Application
     private const string MutexName = @"Global\DSH-APP-SingleInstance-4F2A9C71";
 
     private Mutex? _mutex;
-    private bool _ownsMutex;
     private string _logFilePath = "";
 
     /// <summary>主窗口持有的服务器控制器，供异常兜底时清理。</summary>
@@ -29,9 +29,12 @@ public partial class App : Application
         Directory.CreateDirectory(logDir);
         _logFilePath = Path.Combine(logDir, "app.log");
 
-        _mutex = new Mutex(true, MutexName, out var createdNew);
-        _ownsMutex = createdNew;
-        if (!createdNew)
+        // 单实例双保险（v1.2.1 加固）：
+        // ① 互斥体"存在性"语义：不请求所有权（Mutex(false,…)），对象存在即代表有实例，
+        //    规避"持有权释放但进程存活"的竞态（曾导致新/旧版本并存）；
+        // ② 进程扫描兜底：任何存活的 dsh-app 进程（含互斥体已丢失的僵尸实例）都会被拦下。
+        _mutex = new Mutex(false, MutexName, out var createdNew);
+        if (!createdNew && OtherInstanceRunning())
         {
             // 已有实例在运行：激活其窗口后退出本实例
             ActivateExistingWindow();
@@ -70,13 +73,27 @@ public partial class App : Application
         ActiveServer?.Shutdown();
         ActiveServer?.Dispose();
         ActiveServer = null;
-        if (_ownsMutex)
-        {
-            try { _mutex?.ReleaseMutex(); }
-            catch { /* 忽略 */ }
-        }
-        _mutex?.Dispose();
+        _mutex?.Dispose(); // 存在性语义：无需 ReleaseMutex，句柄关闭即释放
         base.OnExit(e);
+    }
+
+    /// <summary>是否存在其他存活的 dsh-app 进程（任意版本/路径，进程名相同即拦截）。</summary>
+    private static bool OtherInstanceRunning()
+    {
+        var me = Environment.ProcessId;
+        try
+        {
+            foreach (var p in Process.GetProcessesByName("dsh-app"))
+            {
+                if (p.Id != me)
+                    return true;
+            }
+        }
+        catch
+        {
+            // 枚举失败不阻塞启动（互斥体仍是第一道防线）
+        }
+        return false;
     }
 
     private void WriteLog(string message)

@@ -5,6 +5,8 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         xmlns:helpers="clr-namespace:dsh_app.Helpers"
+        xmlns:views="clr-namespace:dsh_app.Views"
+        xmlns:tb="clr-namespace:Hardcodet.Wpf.TaskbarNotification;assembly=Hardcodet.NotifyIcon.Wpf"
         mc:Ignorable="d"
         Title="DeepSeek Harness"
         Width="1200" Height="800"
@@ -67,7 +69,7 @@
                         Content="菜单"
                         Style="{DynamicResource IconButton}"
                         Click="TitleBtnMenu_Click" />
-                <!-- 余额显示（菜单右侧，非工具按钮；点击手动刷新；仅在设置开启时可见）：
+                <!-- 余额显示（菜单右侧，非工具按钮；左键弹菜单（刷新/充值）；仅在设置开启时可见）：
                      IconButton 样式提供 hover 点击反馈（背景 HoverBgBrush），
                      与顶栏工具按钮同高 26 同中心，严格一条线 -->
                 <Button x:Name="TitleBalance"
@@ -107,34 +109,30 @@
                 </Border>
             </Popup>
 
-            <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响） -->
+            <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响；内容为公共菜单控件） -->
             <Popup x:Name="MenuPopup"
                    Placement="Bottom"
                    PlacementTarget="{Binding ElementName=TitleBtnMenu}"
                    AllowsTransparency="True"
                    StaysOpen="False">
-                <Border Width="220"
-                        Padding="4"
-                        Background="{DynamicResource BgCardBrush}"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="8">
-                    <StackPanel>
-                        <Button Content="关于"
-                                Style="{DynamicResource MenuItemButton}"
-                                Click="MenuAbout_Click" />
-                        <Button Content="设置"
-                                Style="{DynamicResource MenuItemButton}"
-                                Click="MenuSettings_Click" />
-                        <Button Content="日志"
-                                Style="{DynamicResource MenuItemButton}"
-                                Click="MenuLog_Click" />
-                        <Button x:Name="MenuCheckUpdate"
-                                Content="检查更新"
-                                Style="{DynamicResource MenuItemButton}"
-                                Click="MenuCheckUpdate_Click" />
-                    </StackPanel>
-                </Border>
+                <views:AppMenuPanel x:Name="TopMenu" />
+            </Popup>
+
+            <!-- 余额右键菜单：点击"打开充值页"才跳转（右键余额不再直接跳转） -->
+            <Popup x:Name="BalanceMenuPopup"
+                   Placement="Bottom"
+                   PlacementTarget="{Binding ElementName=TitleBalance}"
+                   AllowsTransparency="True"
+                   StaysOpen="False">
+                <views:AppMenuPanel x:Name="BalanceMenu" />
+            </Popup>
+
+            <!-- 托盘右键菜单：Popup + 公共菜单控件，与 APP 内菜单完全同源（弃用 ContextMenu） -->
+            <Popup x:Name="TrayMenuPopup"
+                   Placement="AbsolutePoint"
+                   AllowsTransparency="True"
+                   StaysOpen="False">
+                <views:AppMenuPanel x:Name="TrayMenu" />
             </Popup>
 
             <!-- 系统按钮 -->
@@ -317,7 +315,7 @@
                                                      TargetScrollViewer="{Binding ElementName=OverlayLogScroller}" />
                         </Grid>
 
-                        <TextBlock Text="dsh-app v1.1 · DeepSeek Harness 桌面壳"
+                        <TextBlock Text="dsh-app v1.2 · DeepSeek Harness 桌面壳"
                                    Margin="0,8,0,0"
                                    FontSize="11"
                                    Foreground="{DynamicResource TextWeakBrush}" />
@@ -325,5 +323,11 @@
                 </Border>
             </Grid>
         </Grid>
+
+        <!-- 系统托盘图标（Hardcodet WPF 实现；最小化到托盘时窗口隐藏但服务继续）。
+             Icon 与事件在代码中绑定；右键菜单经 TrayRightMouseDown → TrayMenuPopup（同源公共菜单）。 -->
+        <tb:TaskbarIcon x:Name="TrayIcon"
+                        ToolTipText="DeepSeek Harness"
+                        Visibility="Collapsed" />
     </Grid>
 </Window>

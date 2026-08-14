@@ -16,6 +16,9 @@
     <SolidColorBrush x:Key="AccentGreenBrush" Color="#1A7F37" />
     <SolidColorBrush x:Key="AccentRedBrush" Color="#CF222E" />
     <SolidColorBrush x:Key="AccentOrangeBrush" Color="#BC4C00" />
+    <!-- 余额告警黄（余额 <¥5 时顶栏文字色）：GitHub Light 黄文字 #9A6700，
+         浅底对比度约 4.5:1 达标（WCAG AA）；深色对应 #D29922 -->
+    <SolidColorBrush x:Key="BalanceAlertBrush" Color="#9A6700" />
     <SolidColorBrush x:Key="ButtonGreenBrush" Color="#1F883D" />
     <!-- 按钮蓝（主操作按钮底色，与深色 #1F6FEB 同 key 对应） -->
     <SolidColorBrush x:Key="ButtonBlueBrush" Color="#0969DA" />

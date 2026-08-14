@@ -39,6 +39,10 @@ public partial class SettingsWindow : Window
 
         ChkAutoCheckUpdate.IsChecked = AppSettings.Current.AutoCheckUpdate;
         ChkShowBalance.IsChecked = AppSettings.Current.ShowBalance;
+        ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
+        ChkBalanceAlert.IsChecked = AppSettings.Current.BalanceAlertEnabled;
+        ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
+        UpdateAlertUI();
         UpdateBalanceOptions();
         _initializing = false;
 
@@ -70,6 +74,40 @@ public partial class SettingsWindow : Window
     {
         AppSettings.Current.AutoCheckUpdate = ChkAutoCheckUpdate.IsChecked == true;
         AppSettings.Current.Save();
+    }
+
+    // ---------------- 常驻（最小化到托盘） ----------------
+
+    private void OnTrayCloseChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.MinimizeToTrayOnClose = ChkTrayClose.IsChecked == true;
+        AppSettings.Current.Save();
+    }
+
+    // ---------------- 余额告警 ----------------
+
+    private void OnBalanceAlertChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.BalanceAlertEnabled = ChkBalanceAlert.IsChecked == true;
+        AppSettings.Current.Save();
+        UpdateAlertUI();
+    }
+
+    private void UpdateAlertUI()
+    {
+        AlertThresholdPanel.Visibility = ChkBalanceAlert.IsChecked == true
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>阈值失焦即保存；非法输入回显当前值。</summary>
+    private void ThresholdBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (decimal.TryParse(ThresholdBox.Text.Trim(), out var value) && value > 0)
+        {
+            AppSettings.Current.BalanceAlertThreshold = value;
+            AppSettings.Current.Save();
+        }
+        ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
     }
 
     // ---------------- 余额显示 ----------------

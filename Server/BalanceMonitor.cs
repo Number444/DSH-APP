@@ -44,8 +44,14 @@ public sealed class BalanceMonitor : IDisposable
     /// <summary>余额变化/刷新回调：参数为格式化后的金额文本（"23.50"，不含货币符号），失败/未配置/账户不可用为 null。</summary>
     public event Action<string?>? BalanceChanged;
 
+    /// <summary>余额数值变化回调（供告警等数值逻辑）：成功为金额，失败/清除为 null。</summary>
+    public event Action<decimal?>? BalanceAmountChanged;
+
     /// <summary>明细文本（总额/赠送/充值/更新时间），供悬停 ToolTip。</summary>
     public string? DetailText { get; private set; }
+
+    /// <summary>最近一次成功获取的余额数值（null = 无）。</summary>
+    public decimal? LastBalance { get; private set; }
 
     /// <summary>最近一次失败原因（null = 无）。</summary>
     public string? LastError { get; private set; }
@@ -171,8 +177,10 @@ public sealed class BalanceMonitor : IDisposable
                 ActiveSource = source;
                 DetailText = outcome.Detail;
                 _lastBalanceText = outcome.BalanceText;
+                LastBalance = outcome.BalanceAmount;
                 LastError = null;
                 BalanceChanged?.Invoke(outcome.BalanceText);
+                BalanceAmountChanged?.Invoke(outcome.BalanceAmount);
             });
             return;
         }
@@ -187,7 +195,9 @@ public sealed class BalanceMonitor : IDisposable
                 return; // 保留上次显示值，仅更新错误原因
             DetailText = null;
             _lastBalanceText = null;
+            LastBalance = null;
             BalanceChanged?.Invoke(null);
+            BalanceAmountChanged?.Invoke(null);
         });
     }
 
@@ -200,8 +210,10 @@ public sealed class BalanceMonitor : IDisposable
             ActiveSource = source;
             DetailText = null;
             _lastBalanceText = null;
+            LastBalance = null;
             LastError = error;
             BalanceChanged?.Invoke(null);
+            BalanceAmountChanged?.Invoke(null);
         });
     }
 
@@ -349,7 +361,7 @@ public sealed class BalanceMonitor : IDisposable
             var balanceText = total.ToString("0.00", CultureInfo.InvariantCulture);
             var detail = $"总额 ¥{Money(total)} · 赠送 ¥{Money(granted)} · 充值 ¥{Money(toppedUp)} · 更新 {DateTime.Now:HH:mm:ss}";
 
-            return new FetchOutcome { Ok = true, BalanceText = balanceText, Detail = detail };
+            return new FetchOutcome { Ok = true, BalanceText = balanceText, BalanceAmount = total, Detail = detail };
         }
         catch (JsonException)
         {
@@ -395,6 +407,9 @@ public sealed class BalanceMonitor : IDisposable
 
         /// <summary>成功：格式化金额文本（"23.50"）。</summary>
         public string? BalanceText;
+
+        /// <summary>成功：金额数值（告警比较用）。</summary>
+        public decimal? BalanceAmount;
 
         /// <summary>成功：ToolTip 明细文本。</summary>
         public string? Detail;

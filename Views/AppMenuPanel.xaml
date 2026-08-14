@@ -1,0 +1,14 @@
+<UserControl x:Class="dsh_app.Views.AppMenuPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- 通用下拉菜单卡片容器：顶栏菜单与托盘右键菜单共用。
+         视觉 = 卡片背景 + 圆角 + MenuItemButton 项列表；点击经 ItemClicked 路由出去。 -->
+    <Border MinWidth="220"
+            Padding="4"
+            Background="{DynamicResource BgCardBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+        <StackPanel x:Name="ItemsHost" />
+    </Border>
+</UserControl>

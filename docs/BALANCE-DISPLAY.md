@@ -220,7 +220,7 @@ settings.json（`%LOCALAPPDATA%\dsh-app\`）扩展：
 
 ## 11. 后续可选（本期不做）
 
-- 余额低于阈值变色提醒（如 < ¥5 变橙/红）
+- ~~余额低于阈值变色提醒~~ → **v1.2.0 已实现**（见下方实现记录）
 - 多币种/多账户切换
 - 从 dsh 借用 key（等 dsh 官方提供余额接口后，壳退回"纯 HTTP 边界"零配置）
 
@@ -235,3 +235,12 @@ settings.json（`%LOCALAPPDATA%\dsh-app\`）扩展：
 - `MainWindow`：顶栏菜单按钮右侧余额 TextBlock（点击刷新、ToolTip 明细、`—`/`…` 状态）；页面加载完成后 Start，关窗 Stop；设置窗关闭后同步开关并立即刷新。
 - `SettingsWindow`：显示余额开关（默认关）+ 授权状态/撤销/重新授权 + 手动 Key（PasswordBox，DPAPI 加密，失焦保存）+ 首次主动开启弹授权确认；**构造期赋值不触发弹窗**（`_initializing` 屏蔽，避免每次打开设置窗重弹）。
 - 冒烟：余额端点可达（401 认证拒绝符合预期）；启动/单实例链路回归通过。
+
+## 实现记录（v1.2.0 · 2026-08-14 常驻体验）
+
+- **余额告警**：`BalanceMonitor` 新增 `BalanceAmountChanged(decimal?)` 事件与 `LastBalance` 属性（成功回调金额数值，失败/清除回调 null）；`MainWindow.OnBalanceAmountChanged` 做**阈值跨越检测**（上次 ≥ 阈值、本次 < 阈值才提醒一次，恢复后复位，避免 60s 轮询反复轰炸）→ 双通道提醒：窗口内橙色状态卡 + 托盘气泡（`TaskbarIcon.ShowBalloonTip`，点击气泡直达充值页）。
+- **余额左键菜单**（v1.2.1 重构，**右键交互已删除**）：`TitleBalance_Click` 左键弹出 `BalanceMenuPopup`（AppMenuPanel 公共菜单）→ **刷新余额**（点击后余额按钮下方状态卡先显"正在刷新余额…"，结果回调更新 ✓/✗）与 **打开充值页**（点击后才 `OpenTopUpPage()` 打开 `https://platform.deepseek.com/usage`，用户确认的充值路径）；ToolTip 为"左键菜单：刷新 / 充值"。
+- **余额状态色**（v1.2.1）：文字颜色按余额分级——≥¥5 `AccentBlueBrush`（公共蓝）、¥2~¥5 `BalanceAlertBrush`（告警黄，新增 token 双套字典同 key）、<¥2 `AccentRedBrush`（危险红）；阈值固定常量（`BalanceWarnThreshold=5` / `BalanceDangerThreshold=2`），与设置页可调的通知阈值相互独立；失败/无值回退默认弱色。规范见 docs/UI-GUIDELINES.md §4.1。
+- **设置页**：余额区新增"余额低于阈值时提醒"开关（默认开）+ 阈值输入（默认 ¥5，失焦校验保存，非法回显当前值）。
+- **设置持久化**：`AppSettings` 新增 `MinimizeToTrayOnClose`（默认 true）、`BalanceAlertEnabled`（默认 true）、`BalanceAlertThreshold`（默认 5m）。
+- 托盘悬停同步实时余额（`TaskbarIcon.ToolTipText`：`DeepSeek Harness — 余额 ¥xx.xx`）。

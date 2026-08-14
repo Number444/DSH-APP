@@ -28,6 +28,15 @@ public sealed class AppSettings
     /// <summary>顶栏显示余额（默认关）。</summary>
     public bool ShowBalance { get; set; }
 
+    /// <summary>关闭窗口时最小化到托盘（服务继续运行；默认开）。关 = 关窗即退出（v1.1 行为）。</summary>
+    public bool MinimizeToTrayOnClose { get; set; } = true;
+
+    /// <summary>余额低于阈值时提醒（默认开，仅在余额监控运行时生效）。</summary>
+    public bool BalanceAlertEnabled { get; set; } = true;
+
+    /// <summary>余额告警阈值（元，默认 5）。</summary>
+    public decimal BalanceAlertThreshold { get; set; } = 5m;
+
     /// <summary>允许读取 ~/.dsh/.credentials.yaml（用户确认弹窗授权后置真，可撤销）。</summary>
     public bool AllowReadDshCredentials { get; set; }
 

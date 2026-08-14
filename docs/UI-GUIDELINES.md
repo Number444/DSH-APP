@@ -48,6 +48,8 @@
 
 **工具按钮固定清单（4 个，勿删减，纯文字）**：刷新 / 浏览器 / 重启服务 / 菜单（下拉：关于、设置、日志、检查更新）。日志入口在菜单内（2026-08-14 自顶栏移入）。
 
+**下拉菜单公共控件**（v1.2.0）：菜单项渲染统一走 `Views/AppMenuPanel`（卡片容器 + `MenuItemButton` 项，点击经 `ItemClicked(Tag)` 路由）；**顶栏下拉、托盘右键、余额左键三处菜单全部同源**（均为 Popup + AppMenuPanel；v1.2.1 起托盘弃用 ContextMenu——系统 ContextMenu 的弹出动画/阴影/触发与 APP 内 Popup 菜单差异明显）。菜单项数据模型 `AppMenuItem(Tag, Content, Foreground?, Enabled?)`，高亮（更新可用蓝色）与禁用（检查/更新中）由 `MainWindow.UpdateMenuItems()` 重建列表驱动（托盘项经 `UpdateTrayMenuItems` 联动）。余额菜单（左键弹出）：刷新余额 / 打开充值页，刷新结果经余额按钮下方状态卡反馈；点击外部自动关闭（WH_MOUSE_LL 钩子，见 MainWindow 实现）。
+
 **规则 R7（按钮区互斥）**：顶栏按钮在错误态也必须可用（日志、刷新、重启都是排查入口）——因此 Overlay 必须在内容区（Row 1），**不得覆盖顶栏**。
 
 ---
@@ -113,8 +115,19 @@
 | 绿 | `#3FB950` | 完成 ✓ |
 | 红 | `#F85149` | 失败 ✗、破坏性操作按钮 |
 | 橙 | `Orange` | 警告 ⚠ |
+| 告警黄 | `BalanceAlertBrush`（深 `#D29922` / 浅 `#9A6700`） | **余额告警状态色**（见下）；深底对比度 ~8:1、浅底 ~4.5:1 均达标（WCAG AA） |
 | 蓝按钮 | `#1F6FEB`（浅色 `#0969DA`） | **主操作按钮**（弹窗确定/更新/授权等；深色下白字对比度 4.6:1 达标，勿用 `#58A6FF` 作按钮底） |
 | 绿按钮 | `#238636` | **恢复/重点操作**（错误卡"重试"等唯一恢复入口） |
+
+**余额状态色规范**（顶栏余额文字，v1.2.1 定型）：
+
+| 余额 | Token | 含义 |
+|---|---|---|
+| ≥ ¥5 | `AccentBlueBrush`（公共蓝） | 正常（常驻蓝色） |
+| ¥2 ≤ 余额 < ¥5 | `BalanceAlertBrush`（告警黄） | 偏低，建议关注 |
+| < ¥2 | `AccentRedBrush`（危险红） | 严重不足，尽快充值 |
+
+> 阈值固定（5 / 2，`MainWindow` 常量 `BalanceWarnThreshold` / `BalanceDangerThreshold`），与设置页"余额告警通知阈值"（可调、仅通知）相互独立；失败/无值状态回退按钮默认弱色（`TextWeakBrush`）。新增状态色必须双套字典同 key（R8）。
 
 ### 4.2 字号阶梯与行高（**对齐规则核心**）
 
@@ -178,7 +191,9 @@
 | 重试 / 顶栏重启服务 | **先 `WebView.Visibility = Collapsed`（R1：覆盖层盖不住 HWND）** → `ShowLoading()`（重置步骤）→ `Shutdown()` → 重新 `EnsureServerAsync()` → `Navigate` |
 | 顶栏刷新 | `CoreWebView2.Reload()`（页面卡死时用） |
 | 顶栏浏览器打开 | `Process.Start(url, UseShellExecute=true)`——用户原有的浏览器工作流后路 |
-| 关窗 | `ServerController.Shutdown()`：清理**自己拉起的**进程；**接管的外部服务经身份验证（进程命令行含 dsh/bin.js 特征）确认是 dsh 后一并停止**（防"关不掉"残留），非 dsh 程序绝不误杀 |
+| 关窗（默认） | **最小化到托盘**：`OnClosing` 中 `e.Cancel + Hide()`（服务继续运行）；首次隐藏弹托盘气泡提示；设置 `MinimizeToTrayOnClose=false` 恢复关窗即退 |
+| 托盘退出 | 托盘菜单"退出"置 `_trayExitRequested=true` 再 `Close()` 放行；更新中断确认（`_abortUpdateConfirmed`）同样放行——两者都必须排除在托盘拦截之外 |
+| 托盘化后清理 | `ServerController.Shutdown()`：清理**自己拉起的**进程；**接管的外部服务经身份验证（进程命令行含 dsh/bin.js 特征）确认是 dsh 后一并停止**（防"关不掉"残留），非 dsh 程序绝不误杀 |
 
 ---
 

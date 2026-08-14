@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -41,10 +42,26 @@ public partial class MainWindow : Window
     private bool _updating;
     private bool _balanceRunning;
     private bool _abortUpdateConfirmed;
+    /// <summary>托盘"退出"请求：跳过最小化到托盘拦截，真正退出。</summary>
+    private bool _trayExitRequested;
+    /// <summary>首次隐藏到托盘时是否已提示。</summary>
+    private bool _trayHintShown;
+    /// <summary>余额是否高于告警阈值（初始视为高：首次刷新低于阈值即告警；恢复后复位）。</summary>
+    private bool _wasAboveThreshold = true;
+    /// <summary>余额状态色阈值（固定）：低于此值变黄（告警）。</summary>
+    private const decimal BalanceWarnThreshold = 5m;
+    /// <summary>余额状态色阈值（固定）：低于此值变红（危险）。</summary>
+    private const decimal BalanceDangerThreshold = 2m;
     /// <summary>用户点击余额触发的刷新待结果（仅此场景弹状态窗；后台轮询不弹）。</summary>
     private bool _userRefreshPending;
     /// <summary>状态窗序号：防快速连续点击时旧延迟关闭误关新弹窗。</summary>
     private int _statusSeq;
+
+    // ---- 菜单"点击外部关闭"（低级鼠标钩子） ----
+    // WebView2 是原生 HWND：点击页面区域不进入 WPF 输入路由，Popup 的 StaysOpen=False
+    // 检测不到"外部点击"（托盘场景 Popup 捕获还可能被托盘交互抢占）→ 用 WH_MOUSE_LL 全局兜底。
+    private IntPtr _mouseHook;
+    private LowLevelMouseProc? _mouseHookProc;
 
     public MainWindow()
     {
@@ -65,6 +82,33 @@ public partial class MainWindow : Window
 
         // 余额监控：回调经 Dispatcher 上 UI（R4 线程铁律）
         _balance.BalanceChanged += text => Dispatcher.Invoke(() => OnBalanceChanged(text));
+        _balance.BalanceAmountChanged += amount => Dispatcher.Invoke(() => OnBalanceAmountChanged(amount));
+
+        // 顶栏菜单：公共菜单控件 + 数据驱动菜单项（更新状态高亮由 UpdateMenuItems 维护）
+        TopMenu.ItemClicked += OnTopMenuClicked;
+        UpdateMenuItems();
+
+        // 余额左键菜单（刷新 / 充值；右键交互已删除）
+        BalanceMenu.ItemClicked += OnTopMenuClicked;
+        BalanceMenu.ItemsSource = new[]
+        {
+            new AppMenuItem("refresh", "刷新余额"),
+            new AppMenuItem("topup", "打开充值页"),
+        };
+
+        // 托盘菜单：与 APP 内菜单同一公共控件（Popup 定位，弃用 ContextMenu）；内容由 UpdateMenuItems 联动
+        TrayMenu.ItemClicked += OnTopMenuClicked;
+
+        // 菜单"点击外部关闭"：三个 Popup 全部接入（打开时装钩子，关闭时自动卸载）
+        MenuPopup.Opened += (_, _) => InstallDismissHook();
+        MenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
+        BalanceMenuPopup.Opened += (_, _) => InstallDismissHook();
+        BalanceMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
+        TrayMenuPopup.Opened += (_, _) => InstallDismissHook();
+        TrayMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
+
+        // 系统托盘：图标/事件（失败静默，不影响主流程）
+        InitTray();
 
         // 接管模式（外部 dsh）心跳：进程不归属本壳，只能靠 HTTP 探测感知死亡
         _heartbeat = new DispatcherTimer { Interval = HeartbeatInterval };
@@ -385,40 +429,271 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------------- 菜单（关于 / 设置） ----------------
+    // ---------------- 菜单（顶栏下拉 / 托盘右键 / 余额右键共用） ----------------
 
     private void TitleBtnMenu_Click(object sender, RoutedEventArgs e) => MenuPopup.IsOpen = true;
 
-    private void MenuAbout_Click(object sender, RoutedEventArgs e)
+    /// <summary>公共菜单项路由：顶栏（TopMenu）、托盘（TrayMenu）、余额（BalanceMenu）共用。</summary>
+    private async void OnTopMenuClicked(string tag)
     {
         MenuPopup.IsOpen = false;
-        new Views.AboutWindow { Owner = this }.ShowDialog();
+        BalanceMenuPopup.IsOpen = false;
+        TrayMenuPopup.IsOpen = false;
+        switch (tag)
+        {
+            case "about":
+                new Views.AboutWindow { Owner = this }.ShowDialog();
+                break;
+            case "settings":
+                OpenSettingsDialog();
+                break;
+            case "log":
+                OpenLog();
+                break;
+            case "checkupdate":
+                _ = CheckUpdateAsync();
+                break;
+            case "show":
+                ShowMainWindow();
+                break;
+            case "refresh":
+                // 余额菜单"刷新余额"：状态卡先显示"刷新中"，结果由 BalanceChanged 回调更新
+                _userRefreshPending = true;
+                ShowBalanceStatus("正在刷新余额…");
+                var requested = await _balance.RefreshAsync();
+                if (!requested)
+                {
+                    // 防抖/防重入忽略：无回调会来，直接提示并复位
+                    _userRefreshPending = false;
+                    ShowBalanceStatus("操作太频繁，请稍后再试",
+                        (Brush)FindResource("AccentOrangeBrush"));
+                }
+                break;
+            case "topup":
+                OpenTopUpPage();
+                break;
+            case "exit":
+                _trayExitRequested = true;
+                Close();
+                break;
+        }
     }
 
-    private void MenuLog_Click(object sender, RoutedEventArgs e)
+    /// <summary>打开设置窗口（顶栏菜单 / 托盘菜单共用）；关闭后同步余额开关状态。</summary>
+    private void OpenSettingsDialog()
     {
-        MenuPopup.IsOpen = false;
-        OpenLog();
-    }
-
-    private void MenuSettings_Click(object sender, RoutedEventArgs e)
-    {
-        MenuPopup.IsOpen = false;
         var dlg = new Views.SettingsWindow { Owner = this };
         dlg.ShowDialog();
         // 设置可能改了余额开关，关闭后同步启动/停止
         SyncBalanceFromSettings();
     }
 
+    /// <summary>恢复并激活主窗口（托盘双击 / 托盘"打开主窗口"）。</summary>
+    private void ShowMainWindow()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+        Activate();
+        // 抢焦点：窗口从后台/隐藏恢复时置顶闪回（先置顶再取消，仅抢激活）
+        Topmost = true;
+        Topmost = false;
+    }
+
+    /// <summary>打开 DeepSeek 开放平台充值页（默认浏览器）。</summary>
+    private void OpenTopUpPage()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://platform.deepseek.com/usage") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开充值页失败: {ex.Message}");
+        }
+    }
+
+    // ---------------- 系统托盘 ----------------
+
+    /// <summary>初始化托盘图标：提取 exe 自带图标、绑定双击恢复与右键菜单（Popup 方案）。</summary>
+    private void InitTray()
+    {
+        try
+        {
+            var icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? "");
+            if (icon is null) return;
+            TrayIcon.Icon = icon;
+            TrayIcon.Visibility = Visibility.Visible;
+            TrayIcon.TrayMouseDoubleClick += (_, _) => ShowMainWindow();
+            // 右键弹菜单（与 APP 内同款 Popup 菜单；不设 ContextMenu，避免系统样式/动画差异）。
+            // 用 Up 而非 Down：按下时打开会让同一交互序列的弹起被 Popup 当作"外部点击"而立即关闭（闪烁）。
+            TrayIcon.TrayRightMouseUp += (_, _) => OpenTrayMenu();
+            // 余额告警气泡点击 → 充值页
+            TrayIcon.TrayBalloonTipClicked += (_, _) => OpenTopUpPage();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"托盘初始化失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>在托盘图标旁弹出右键菜单（复用公共菜单控件；紧贴鼠标展开，超屏自动反向——系统右键菜单同款行为）。</summary>
+    private void OpenTrayMenu()
+    {
+        // 已打开 → 再点关闭（toggle）
+        if (TrayMenuPopup.IsOpen)
+        {
+            TrayMenuPopup.IsOpen = false;
+            return;
+        }
+
+        UpdateTrayMenuItems();
+        GetCursorPos(out var pt); // 物理像素
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        double x = pt.X / dpi;
+        double y = pt.Y / dpi;
+        var work = SystemParameters.WorkArea;
+
+        // 菜单估算尺寸（4 项 × 32 + 8 padding ≈ 136；留余量防超界）
+        const double menuW = 228;
+        const double menuH = 148;
+        // 默认在鼠标右下方展开（紧贴）；右/下放不下则反向（图标在任务栏底部时菜单自然落在图标正上方）
+        double offsetX = x + 4;
+        if (offsetX + menuW > work.Right)
+            offsetX = x - menuW;
+        double offsetY = y + 4;
+        if (offsetY + menuH > work.Bottom)
+            offsetY = y - menuH;
+
+        TrayMenuPopup.HorizontalOffset = offsetX;
+        TrayMenuPopup.VerticalOffset = offsetY;
+        TrayMenuPopup.IsOpen = true;
+    }
+
+    // ---------------- 菜单点击外部关闭（低级鼠标钩子） ----------------
+
+    private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MBUTTONDOWN = 0x0207;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MsllHookStruct
+    {
+        public int X;
+        public int Y;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public IntPtr DwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+    /// <summary>菜单 Popup 打开时安装全局鼠标钩子（幂等）。</summary>
+    private void InstallDismissHook()
+    {
+        if (_mouseHook != IntPtr.Zero) return;
+        _mouseHookProc = OnLowLevelMouse; // 强引用防 GC
+        _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseHookProc, GetModuleHandle(null), 0);
+        if (_mouseHook == IntPtr.Zero)
+            _mouseHookProc = null; // 安装失败：退化为 Popup 自身 StaysOpen=False 行为
+    }
+
+    /// <summary>所有菜单都关闭后卸载钩子（幂等）。</summary>
+    private void UninstallDismissHookIfIdle()
+    {
+        if (MenuPopup.IsOpen || BalanceMenuPopup.IsOpen || TrayMenuPopup.IsOpen) return;
+        if (_mouseHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_mouseHook);
+        _mouseHook = IntPtr.Zero;
+        _mouseHookProc = null;
+    }
+
+    /// <summary>任意鼠标按下：若点击落在打开的菜单矩形外 → 关闭（经 Dispatcher 上 UI 线程）。</summary>
+    private IntPtr OnLowLevelMouse(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0)
+        {
+            int msg = wParam.ToInt32();
+            if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+            {
+                var info = Marshal.PtrToStructure<MsllHookStruct>(lParam);
+                Dispatcher.BeginInvoke(() =>
+                {
+                    var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+                    var pt = new Point(info.X / dpi, info.Y / dpi);
+                    foreach (var popup in new[] { MenuPopup, BalanceMenuPopup, TrayMenuPopup })
+                    {
+                        if (!popup.IsOpen) continue;
+                        var rect = GetPopupScreenRect(popup);
+                        if (!rect.IsEmpty && !rect.Contains(pt))
+                            popup.IsOpen = false;
+                    }
+                    UninstallDismissHookIfIdle();
+                });
+            }
+        }
+        return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+    }
+
+    /// <summary>Popup 内容在屏幕上的矩形（DIP；Popup 是独立 HWND，Child.PointToScreen 即为屏幕坐标）。</summary>
+    private static Rect GetPopupScreenRect(Popup popup)
+    {
+        if (!popup.IsOpen || popup.Child is not FrameworkElement child)
+            return Rect.Empty;
+        try
+        {
+            var topLeft = child.PointToScreen(new Point(0, 0));
+            var dpi = VisualTreeHelper.GetDpi(popup).PixelsPerDip;
+            return new Rect(topLeft.X / dpi, topLeft.Y / dpi, child.ActualWidth, child.ActualHeight);
+        }
+        catch
+        {
+            return Rect.Empty; // 测量未完成等瞬时状态：跳过本次判定
+        }
+    }
+
+    /// <summary>托盘菜单项：打开主窗口 / 检查更新 / 设置 / 退出（检查更新状态与顶栏同步）。</summary>
+    private void UpdateTrayMenuItems()
+    {
+        var items = new List<AppMenuItem>();
+        items.Add(new AppMenuItem("show", "打开主窗口"));
+        if (_updating)
+            items.Add(new AppMenuItem("checkupdate", "正在更新 Harness…", Enabled: false));
+        else if (_checking)
+            items.Add(new AppMenuItem("checkupdate", "检查更新…", Enabled: false));
+        else if (_updater.LastCheckSucceeded && _updater.HasUpdate)
+            items.Add(new AppMenuItem("checkupdate",
+                $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}",
+                (Brush)FindResource("AccentBlueBrush")));
+        else
+            items.Add(new AppMenuItem("checkupdate", "检查更新"));
+        items.Add(new AppMenuItem("settings", "设置"));
+        items.Add(new AppMenuItem("exit", "退出"));
+        TrayMenu.ItemsSource = items;
+    }
+
     // ---------------- 菜单（Harness 更新） ----------------
 
-    private async void MenuCheckUpdate_Click(object sender, RoutedEventArgs e)
+    /// <summary>检查 Harness 更新：顶栏菜单与托盘菜单共用入口。防重入，状态经 UpdateMenuItems 反映。</summary>
+    private async Task CheckUpdateAsync()
     {
-        MenuPopup.IsOpen = false;
         if (_checking || _updating) return;
         _checking = true;
-        MenuCheckUpdate.IsEnabled = false;
-        MenuCheckUpdate.Content = "检查更新…";
+        UpdateMenuItems(); // "检查更新…"禁用态
         try
         {
             // 手动点击一律重新检查（不复用启动时的陈旧结果，审查加固项）
@@ -453,8 +728,7 @@ public partial class MainWindow : Window
         finally
         {
             _checking = false;
-            MenuCheckUpdate.IsEnabled = true;
-            UpdateMenuButtonText(); // 复位"检查更新…"文案（有新版则显示高亮提示）
+            UpdateMenuItems(); // 复位"检查更新…"文案（有新版则显示高亮提示）
         }
     }
 
@@ -473,8 +747,7 @@ public partial class MainWindow : Window
         _updating = true;
         _abortUpdateConfirmed = false;
         TitleBtnRestart.IsEnabled = false;
-        MenuCheckUpdate.IsEnabled = false;
-        MenuCheckUpdate.Content = "正在更新 Harness…";
+        UpdateMenuItems(); // 菜单项显示"正在更新 Harness…"
         try
         {
             // R1：WebView2 是 HWND 子窗口，覆盖层盖不住它——必须先收起页面
@@ -489,7 +762,7 @@ public partial class MainWindow : Window
             if (updated && restarted)
             {
                 AppendLog("Harness 更新成功，重新加载页面");
-                UpdateMenuButtonText();
+                UpdateMenuItems();
                 new Views.ConfirmDialog("更新完成",
                     $"Harness 已更新到 v{_updater.LocalVersion}。",
                     "好的", glyph: "✓") { Owner = this }.ShowDialog();
@@ -511,8 +784,7 @@ public partial class MainWindow : Window
         {
             _updating = false;
             TitleBtnRestart.IsEnabled = true;
-            MenuCheckUpdate.IsEnabled = true;
-            UpdateMenuButtonText(); // 恢复菜单文案（"正在更新 Harness…" → 检查更新/更新可用）
+            UpdateMenuItems(); // 恢复菜单文案（"正在更新 Harness…" → 检查更新/更新可用）
         }
     }
 
@@ -527,7 +799,7 @@ public partial class MainWindow : Window
             if (ok && _updater.HasUpdate)
             {
                 AppendLog($"发现 Harness 新版本：v{_updater.LocalVersion} → v{_updater.LatestVersion}");
-                UpdateMenuButtonText();
+                UpdateMenuItems();
             }
         }
         catch (Exception ex)
@@ -537,19 +809,37 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>菜单项文案：有新版时高亮提示（主题色走资源，R8），否则复位。</summary>
-    private void UpdateMenuButtonText()
+    /// <summary>重建顶栏/托盘菜单项：有新版时高亮提示（主题色走资源，R8），检查/更新中显示进行态。</summary>
+    private void UpdateMenuItems()
     {
-        if (_updater.LastCheckSucceeded && _updater.HasUpdate)
+        var items = new List<AppMenuItem>
         {
-            MenuCheckUpdate.Content = $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}";
-            MenuCheckUpdate.SetResourceReference(Button.ForegroundProperty, "AccentBlueBrush");
+            new("about", "关于"),
+            new("settings", "设置"),
+            new("log", "日志"),
+        };
+
+        if (_updating)
+        {
+            items.Add(new AppMenuItem("checkupdate", "正在更新 Harness…", Enabled: false));
+        }
+        else if (_checking)
+        {
+            items.Add(new AppMenuItem("checkupdate", "检查更新…", Enabled: false));
+        }
+        else if (_updater.LastCheckSucceeded && _updater.HasUpdate)
+        {
+            items.Add(new AppMenuItem("checkupdate",
+                $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}",
+                (Brush)FindResource("AccentBlueBrush")));
         }
         else
         {
-            MenuCheckUpdate.Content = "检查更新";
-            MenuCheckUpdate.ClearValue(Button.ForegroundProperty);
+            items.Add(new AppMenuItem("checkupdate", "检查更新"));
         }
+
+        TopMenu.ItemsSource = items;
+        UpdateTrayMenuItems(); // 托盘"检查更新"项与顶栏联动
     }
 
     // ---------------- 顶栏余额显示 ----------------
@@ -586,9 +876,14 @@ public partial class MainWindow : Window
 
     private void OnBalanceChanged(string? text)
     {
+        // 托盘悬停同步余额（窗口隐藏时也能看到）
+        TrayIcon.ToolTipText = text is null ? "DeepSeek Harness" : $"DeepSeek Harness — 余额 ¥{text}";
+
         if (text is null)
         {
             TitleBalanceText.Text = "—";
+            // 失败/无值：回退按钮默认弱色（继承自 IconButton 样式的 TextWeakBrush）
+            TitleBalanceText.ClearValue(TextBlock.ForegroundProperty);
             TitleBalance.ToolTip = _balance.LastError is null
                 ? "余额获取失败（点击重试）"
                 : $"余额获取失败：{_balance.LastError}（点击重试）";
@@ -602,7 +897,17 @@ public partial class MainWindow : Window
         else
         {
             TitleBalanceText.Text = $"¥ {text}";
-            TitleBalance.ToolTip = _balance.DetailText + "\n点击刷新";
+            TitleBalance.ToolTip = _balance.DetailText + "\n左键菜单：刷新 / 充值";
+            // 余额状态色（规范见 docs/UI-GUIDELINES.md §4.1）：常驻公共蓝；<¥5 告警黄；<¥2 危险红
+            if (_balance.LastBalance is decimal amount)
+            {
+                if (amount < BalanceDangerThreshold)
+                    TitleBalanceText.Foreground = (Brush)FindResource("AccentRedBrush");
+                else if (amount < BalanceWarnThreshold)
+                    TitleBalanceText.Foreground = (Brush)FindResource("BalanceAlertBrush");
+                else
+                    TitleBalanceText.Foreground = (Brush)FindResource("AccentBlueBrush");
+            }
             if (_userRefreshPending)
             {
                 _userRefreshPending = false;
@@ -611,6 +916,42 @@ public partial class MainWindow : Window
             }
         }
     }
+
+    /// <summary>
+    /// 余额告警：仅"跨越阈值"时提醒一次（上次数值高于阈值、本次低于阈值；恢复后复位），
+    /// 避免每 60s 轮询反复轰炸。提醒双通道：窗口状态卡（可见时）+ 托盘气泡（点击跳充值页）。
+    /// </summary>
+    private void OnBalanceAmountChanged(decimal? amount)
+    {
+        if (amount is null || !AppSettings.Current.BalanceAlertEnabled)
+            return;
+
+        var threshold = AppSettings.Current.BalanceAlertThreshold;
+        if (amount >= threshold)
+        {
+            _wasAboveThreshold = true; // 恢复：下次再跌破才提醒
+            return;
+        }
+        if (!_wasAboveThreshold)
+            return;
+
+        _wasAboveThreshold = false;
+        AppendLog($"余额告警：¥{amount:0.00} 低于阈值 ¥{threshold:0.00}");
+        ShowBalanceStatus($"⚠ 余额不足：¥{amount:0.00}（低于 ¥{threshold:0.00}）",
+            (Brush)FindResource("AccentOrangeBrush"), stayMs: 4000);
+        try
+        {
+            TrayIcon.ShowBalloonTip("DeepSeek 余额不足",
+                $"当前余额 ¥{amount:0.00}，低于阈值 ¥{threshold:0.00}。\n点击此通知前往充值。",
+                Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Warning);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"余额告警气泡失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>右键余额交互已删除（v1.2.1）：左键菜单内含刷新/充值；此注释占位防误加回。</summary>
 
     /// <summary>在余额按钮下方显示状态卡（自动关闭；序号防连续点击竞态）。</summary>
     private async void ShowBalanceStatus(string text, Brush? brush = null, int stayMs = 2200)
@@ -635,7 +976,7 @@ public partial class MainWindow : Window
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
     }
 
-    private async void TitleBalance_Click(object sender, RoutedEventArgs e)
+    private void TitleBalance_Click(object sender, RoutedEventArgs e)
     {
         if (TitleBalance.Visibility != Visibility.Visible) return;
         // 弹回动效（BackEase 轻微过冲，模拟弹性按键）
@@ -649,17 +990,8 @@ public partial class MainWindow : Window
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
         }
 
-        // 状态卡：先显示"刷新中"，结果由 BalanceChanged 回调更新（仅用户点击场景弹窗）
-        _userRefreshPending = true;
-        ShowBalanceStatus("正在刷新余额…");
-        var requested = await _balance.RefreshAsync();
-        if (!requested)
-        {
-            // 防抖/防重入忽略：无回调会来，直接提示并复位
-            _userRefreshPending = false;
-            ShowBalanceStatus("操作太频繁，请稍后再试",
-                (Brush)FindResource("AccentOrangeBrush"));
-        }
+        // 左键：打开/关闭余额菜单（刷新 / 充值在菜单内；点击外部或菜单项自动关闭）
+        BalanceMenuPopup.IsOpen = !BalanceMenuPopup.IsOpen;
     }
 
     private void TitleBtnMin_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
@@ -752,6 +1084,29 @@ public partial class MainWindow : Window
             }
             return;
         }
+
+        // 最小化到托盘：隐藏窗口，服务继续运行（托盘菜单"退出"、设置关闭该行为、
+        // 或更新中断确认后（_abortUpdateConfirmed）才真正退出）
+        if (AppSettings.Current.MinimizeToTrayOnClose && !_trayExitRequested && !_abortUpdateConfirmed)
+        {
+            e.Cancel = true;
+            Hide();
+            if (!_trayHintShown)
+            {
+                _trayHintShown = true;
+                try
+                {
+                    TrayIcon.ShowBalloonTip("DeepSeek Harness",
+                        "已最小化到托盘，服务继续运行。\n双击托盘图标恢复窗口，右键可退出。",
+                        Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"托盘提示失败: {ex.Message}");
+                }
+            }
+            AppendLog("窗口最小化到托盘（服务继续运行）");
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -833,6 +1188,9 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out NativePoint lpPoint);
 
     /// <summary>
     /// WindowStyle=None + WindowChrome 下，WPF 最大化默认按整个屏幕扩展窗口

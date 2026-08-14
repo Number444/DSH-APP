@@ -66,6 +66,24 @@
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}" />
 
+        <!-- ==================== 常驻 ==================== -->
+        <TextBlock Text="常驻"
+                   Margin="0,16,0,0"
+                   FontSize="13"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <CheckBox x:Name="ChkTrayClose"
+                  Content="关闭窗口时最小化到托盘（服务继续运行）"
+                  Margin="0,10,0,0"
+                  Style="{DynamicResource ToggleSwitchStyle}"
+                  Checked="OnTrayCloseChanged"
+                  Unchecked="OnTrayCloseChanged" />
+        <TextBlock Text="隐藏到系统托盘，双击图标恢复窗口，右键菜单可退出；关闭此项则关窗即停服退出。"
+                   Margin="0,6,0,0"
+                   FontSize="11"
+                   Foreground="{DynamicResource TextWeakBrush}"
+                   TextWrapping="Wrap" />
+
         <!-- ==================== 余额显示 ==================== -->
         <TextBlock Text="余额显示"
                    Margin="0,16,0,0"
@@ -135,6 +153,41 @@
                            Foreground="{DynamicResource TextWeakBrush}"
                            TextWrapping="Wrap" />
             </StackPanel>
+
+            <!-- 余额告警（仅余额显示开启时可见） -->
+            <CheckBox x:Name="ChkBalanceAlert"
+                      Content="余额低于阈值时提醒"
+                      Margin="0,14,0,0"
+                      Style="{DynamicResource ToggleSwitchStyle}"
+                      Checked="OnBalanceAlertChanged"
+                      Unchecked="OnBalanceAlertChanged" />
+            <StackPanel x:Name="AlertThresholdPanel"
+                        Orientation="Horizontal"
+                        Margin="0,8,0,0"
+                        Visibility="Collapsed">
+                <TextBlock Text="阈值（元）"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextWeakBrush}"
+                           VerticalAlignment="Center" />
+                <TextBox x:Name="ThresholdBox"
+                         Width="70"
+                         Height="26"
+                         Margin="8,0,0,0"
+                         FontSize="12"
+                         Padding="6,0"
+                         VerticalContentAlignment="Center"
+                         CaretBrush="{DynamicResource TextPrimaryBrush}"
+                         Background="{DynamicResource BgCardBrush}"
+                         Foreground="{DynamicResource TextPrimaryBrush}"
+                         BorderBrush="{DynamicResource BorderBrush}"
+                         BorderThickness="1"
+                         LostFocus="ThresholdBox_LostFocus" />
+            </StackPanel>
+            <TextBlock Text="余额跌破阈值时弹出系统通知，点击通知直达充值页（右击余额也可充值）。"
+                       Margin="0,6,0,0"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextWeakBrush}"
+                       TextWrapping="Wrap" />
         </StackPanel>
     </StackPanel>
 </Window>
