@@ -59,10 +59,17 @@ public partial class AppMenuPanel : UserControl
         }
     }
 
-    /// <summary>打开动画（抛出放大 + 模糊渐清 + 惯性回弹）：flyFrom = 抛出起点相对最终位置的偏移（DIP）。</summary>
-    public void PlayOpenAnimation(Point flyFrom) => PopupAnimator.PlayOpen(RootCard, flyFrom);
+    /// <summary>最近一次打开动画的抛出起点（供关闭倒放使用：沿来路飞回锚点）。</summary>
+    private Point _lastFlyFrom;
 
-    /// <summary>关闭动画（向 shrinkTo 方向收拢 + 模糊 + 渐隐），完成后回调（主窗口在回调里置 IsOpen=false）。</summary>
-    public void PlayCloseAnimation(Action? done = null, Point? shrinkTo = null) =>
-        PopupAnimator.PlayClose(RootCard, done, null, shrinkTo);
+    /// <summary>打开动画（抛出放大 + 模糊渐清 + 惯性回弹）：flyFrom = 抛出起点相对最终位置的偏移（DIP）。</summary>
+    public void PlayOpenAnimation(Point flyFrom)
+    {
+        _lastFlyFrom = flyFrom;
+        PopupAnimator.PlayOpen(RootCard, flyFrom);
+    }
+
+    /// <summary>关闭动画（打开动画的严格倒放：沿抛物线原路飞回锚点 + 缩小 + 模糊 + 渐隐），完成后回调。</summary>
+    public void PlayCloseAnimation(Action? done = null) =>
+        PopupAnimator.PlayClose(RootCard, done, null, _lastFlyFrom);
 }

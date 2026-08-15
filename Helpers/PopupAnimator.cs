@@ -39,7 +39,7 @@ public static class PopupAnimator
         "IsClosing", typeof(bool), typeof(PopupAnimator), new PropertyMetadata(false));
 
     /// <summary>
-    /// 播放打开动画。flyFrom = 抛出起点相对最终位置的偏移（DIP）；菜单传 (0,-12)（从按钮上方抛出），
+    /// 播放打开动画。flyFrom = 抛出起点相对最终位置的偏移（DIP）；菜单传 (0,-24)（从按钮上方抛出），
     /// 托盘按光标方向计算；轻量档可传 null（无位移）。
     /// 起始态在同步段内设置并立即播放，渲染首帧即动画起点（不闪帧）。
     /// </summary>
@@ -63,53 +63,68 @@ public static class PopupAnimator
         el.Effect = blur;
 
         var dur = TimeSpan.FromMilliseconds(options.DurationMs);
-        var fadeIn = new DoubleAnimation(0, 1, new Duration(dur))
+        // 淡入比总时长快（弹性档 240ms），保证"惯性滑出"发生时透明度已高、肉眼可见
+        var fadeIn = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(Math.Min(240, options.DurationMs))))
         { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
-        // ElasticEase：先冲过目标再弹回（Oscillations=1 单次回弹，Springiness=5 过冲≈12%，
-        // 有"惯性"感但克制）；轻量档退回纯缓出。过冲幅度与 AnimSafePad 配套（40px 安全区覆盖抛出 + 过冲）
-        DoubleAnimation growX, growY;
+        // 缩放（质感档）：全程平滑展开（0.5→1.0，55% 与落位同步到位），不过冲——
+        // "惯性"由位置承担（见 BuildGlide），缩放过冲观感是"猛地鼓一下"，位置惯性才是落位弹回
+        AnimationTimeline growTx, growTy;
         if (options.Elastic)
         {
-            var ease = new ElasticEase { EasingMode = EasingMode.EaseOut, Oscillations = 1, Springiness = 5 };
-            growX = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
-            growY = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
+            growTx = BuildScale(options, dur);
+            growTy = BuildScale(options, dur);
         }
         else
         {
             var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            growX = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
-            growY = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
+            growTx = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
+            growTy = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
         }
-        // 抛物线：水平先快后慢（抛出）+ 垂直先慢后快（下落），两轴合成弧线
-        var glideX = new DoubleAnimation(translate.X, 0, new Duration(dur))
-        { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
-        var glideY = new DoubleAnimation(translate.Y, 0, new Duration(dur))
-        { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } };
+        // 位置（质感档）：三段关键帧——抛物线落位（0-55%）→ 沿飞行方向惯性滑出 2px（55-72%）→ 平滑弹回（72-100%）。
+        // 惯性方向 = 飞行方向（-flyFrom 归一化）：顶栏继续向下 +2，托盘沿光标反方向 ±2；
+        // 幅度与 AnimSafePad 配套（抛出 24px + 惯性 2px = 26px < 40px 安全区）。
+        // 抛物线：水平先快后慢（抛出）+ 垂直先慢后快（下落，t² 自由落体），两轴合成弧线
+        var inertia = CalcInertia(new Point(translate.X, translate.Y));
+        AnimationTimeline glideTx, glideTy;
+        if (options.Elastic)
+        {
+            glideTx = BuildGlide(translate.X, inertia.X, new KeySpline(0.2, 0.0, 0.6, 1.0), dur);
+            glideTy = BuildGlide(translate.Y, inertia.Y, new KeySpline(0.5, 0.0, 1.0, 1.0), dur);
+        }
+        else
+        {
+            glideTx = new DoubleAnimation(translate.X, 0, new Duration(dur))
+            { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
+            glideTy = new DoubleAnimation(translate.Y, 0, new Duration(dur))
+            { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } };
+        }
         var clear = new DoubleAnimation(options.BlurRadius, 0, new Duration(TimeSpan.FromMilliseconds(options.BlurMs)))
         { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
 
-        // 先挂完成回调再开播；主动画（fadeIn，360ms 最晚）完成时释放 Effect
-        fadeIn.Completed += (_, _) =>
+        // 先挂完成回调再开播；主动画（growTx，总时长最晚）完成时释放 Effect
+        growTx.Completed += (_, _) =>
         {
             // 孤儿动画完成时不误清新动画的 Effect
             if (ReferenceEquals(el.Effect, blur)) el.Effect = null;
         };
         el.BeginAnimation(UIElement.OpacityProperty, fadeIn);
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, growX);
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, growY);
-        translate.BeginAnimation(TranslateTransform.XProperty, glideX);
-        translate.BeginAnimation(TranslateTransform.YProperty, glideY);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, growTx);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, growTy);
+        translate.BeginAnimation(TranslateTransform.XProperty, glideTx);
+        translate.BeginAnimation(TranslateTransform.YProperty, glideTy);
         blur.BeginAnimation(BlurEffect.RadiusProperty, clear);
     }
 
     /// <summary>
-    /// 播放关闭动画：向锚点收拢（缩小 + 朝 shrinkTo 方向位移）+ 模糊 + 渐隐，完成后回调
-    /// （调用方在回调里置 IsOpen=false）。shrinkTo = 收拢目标方向偏移（DIP）：托盘向光标方向、
-    /// 顶栏/余额向按钮方向（上方）；null 则原地缩小（状态卡轻量档）。
-    /// 幂等：已有收拢动画在跑时直接返回（首个动画完成时统一执行关闭）；重新打开由 PlayOpen 取消。
+    /// 播放关闭动画。flyFrom = 打开时的抛出起点（DIP，相对最终位置）：非 null 时执行
+    /// **打开动画的严格倒放**（时间反转 + 缓动反转）——先微动 2px（打开"弹回"的逆过程），
+    /// 再沿抛物线原路飞回锚点，同时缩小/渐模糊/淡出，总时长与打开一致（480ms）。
+    /// flyFrom = null（状态卡轻量档）：原地缩小 + 模糊 + 渐隐（快速 120ms）。
+    /// 完成后回调（调用方在回调里置 IsOpen=false）。幂等：已有收拢在跑时直接返回；
+    /// 重新打开由 PlayOpen 取消。
     /// </summary>
     public static void PlayClose(FrameworkElement el, Action? done = null, CloseOptions? options = null,
-        Point? shrinkTo = null)
+        Point? flyFrom = null)
     {
         options ??= DefaultClose;
         if ((bool)el.GetValue(IsClosingProperty)) return; // 已有收拢在跑：由它完成关闭
@@ -131,14 +146,43 @@ public static class PopupAnimator
         var blur = new BlurEffect { Radius = 0 };
         el.Effect = blur;
 
-        var dur = TimeSpan.FromMilliseconds(options.DurationMs);
-        var ease = new QuadraticEase { EasingMode = EasingMode.EaseIn }; // 加速收拢感
-        var shrinkX = new DoubleAnimation(1, options.EndScale, new Duration(dur)) { EasingFunction = ease };
-        var shrinkY = new DoubleAnimation(1, options.EndScale, new Duration(dur)) { EasingFunction = ease };
-        var glideX = new DoubleAnimation(0, shrinkTo?.X ?? 0, new Duration(dur)) { EasingFunction = ease };
-        var glideY = new DoubleAnimation(0, shrinkTo?.Y ?? 0, new Duration(dur)) { EasingFunction = ease };
-        var blurIn = new DoubleAnimation(0, options.BlurRadius, new Duration(dur)) { EasingFunction = ease };
-        var fadeOut = new DoubleAnimation(1, 0, new Duration(dur)) { EasingFunction = ease };
+        AnimationTimeline shrinkTx, shrinkTy;
+        AnimationTimeline? glideTx, glideTy;
+        AnimationTimeline blurIn, fadeOut;
+        if (flyFrom is { } from && (from.X != 0 || from.Y != 0))
+        {
+            // ---- 倒放档（菜单）：打开动画严格时间反转 ----
+            var dur = TimeSpan.FromMilliseconds(DefaultOpen.DurationMs);
+            var inertia = CalcInertia(from);
+
+            // Scale：1.0（0-45%）→ StartScale（100%，fast 反转）；X/Y 各一个动画实例
+            shrinkTx = BuildScaleReverse(dur);
+            shrinkTy = BuildScaleReverse(dur);
+            // Translate：0 → inertia（0-28%，打开"弹回"的逆）→ 0（28-45%，打开"滑出"的逆）
+            //          → from（45-100%，抛物线原路飞回；flyRev = 打开飞行段 KeySpline 反转）
+            glideTx = BuildGlideReverse(from.X, inertia.X, new KeySpline(0.4, 0.0, 0.8, 1.0), dur);
+            glideTy = BuildGlideReverse(from.Y, inertia.Y, new KeySpline(0.0, 0.0, 0.5, 1.0), dur);
+            // 模糊/淡出：BeginTime 延迟到后段（倒放时序；EaseIn = 打开 EaseOut 的时间反转）
+            blurIn = new DoubleAnimation(0, DefaultOpen.BlurRadius,
+                new Duration(TimeSpan.FromMilliseconds(DefaultOpen.BlurMs)))
+            { BeginTime = TimeSpan.FromMilliseconds(DefaultOpen.DurationMs - DefaultOpen.BlurMs),
+              EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } };
+            fadeOut = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(240)))
+            { BeginTime = TimeSpan.FromMilliseconds(240),
+              EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } };
+        }
+        else
+        {
+            // ---- 轻量档（状态卡）：原地缩小 + 模糊 + 渐隐 ----
+            var dur = TimeSpan.FromMilliseconds(options.DurationMs);
+            var ease = new QuadraticEase { EasingMode = EasingMode.EaseIn }; // 加速收拢感
+            shrinkTx = new DoubleAnimation(1, options.EndScale, new Duration(dur)) { EasingFunction = ease };
+            shrinkTy = new DoubleAnimation(1, options.EndScale, new Duration(dur)) { EasingFunction = ease };
+            glideTx = null;
+            glideTy = null;
+            blurIn = new DoubleAnimation(0, options.BlurRadius, new Duration(dur)) { EasingFunction = ease };
+            fadeOut = new DoubleAnimation(1, 0, new Duration(dur)) { EasingFunction = ease };
+        }
 
         fadeOut.Completed += (_, _) =>
         {
@@ -147,10 +191,10 @@ public static class PopupAnimator
             done?.Invoke();
         };
         el.BeginAnimation(UIElement.OpacityProperty, fadeOut);
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, shrinkX);
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrinkY);
-        translate.BeginAnimation(TranslateTransform.XProperty, glideX);
-        translate.BeginAnimation(TranslateTransform.YProperty, glideY);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, shrinkTx);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrinkTy);
+        if (glideTx != null) translate.BeginAnimation(TranslateTransform.XProperty, glideTx);
+        if (glideTy != null) translate.BeginAnimation(TranslateTransform.YProperty, glideTy);
         blur.BeginAnimation(BlurEffect.RadiusProperty, blurIn);
     }
 
@@ -166,12 +210,68 @@ public static class PopupAnimator
     /// <summary>打开动画参数档。</summary>
     public sealed class OpenOptions
     {
-        public double DurationMs { get; set; } = 360;
+        public double DurationMs { get; set; } = 480;
         public double StartScale { get; set; } = 0.5;
-        public double BlurRadius { get; set; } = 14;
-        public double BlurMs { get; set; } = 220;
+        public double BlurRadius { get; set; } = 20;
+        public double BlurMs { get; set; } = 380;
         public bool Elastic { get; set; } = true;
         public bool Fly { get; set; } = true;
+    }
+
+    /// <summary>缩放关键帧：start→1.0（55% 与落位同步到位），此后保持——全程平滑，无过冲（惯性由位置承担）。</summary>
+    private static DoubleAnimationUsingKeyFrames BuildScale(OpenOptions options, Duration dur)
+    {
+        var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
+        var fast = new KeySpline(0.2, 0.7, 0.3, 1.0);
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(options.StartScale, KeyTime.FromPercent(0.0), fast));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.55), fast));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(1.0), fast));
+        return g;
+    }
+
+    /// <summary>位置三段关键帧：from→0（抛物线落位，0-55%）→ inertia（惯性滑出，55-72%）→ 0（平滑弹回）。
+    /// flySpline 控制抛物线手感：X 轴先快后慢（水平抛出），Y 轴先慢后快（t² 自由落体）。</summary>
+    private static DoubleAnimationUsingKeyFrames BuildGlide(double from, double inertia, KeySpline flySpline, Duration dur)
+    {
+        var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
+        var back = new KeySpline(0.4, 0.0, 0.6, 1.0); // 弹回：先快后慢，轻落定
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(from, KeyTime.FromPercent(0.0), flySpline));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.55), flySpline));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(inertia, KeyTime.FromPercent(0.72), new KeySpline(0.2, 0.0, 0.4, 1.0)));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(1.0), back));
+        return g;
+    }
+
+    /// <summary>缩放关键帧（倒放）：1.0（0-45%）→ StartScale（100%），缓动 = 打开 fast 段的时间反转。</summary>
+    private static DoubleAnimationUsingKeyFrames BuildScaleReverse(Duration dur)
+    {
+        var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
+        var fastRev = new KeySpline(0.7, 0.0, 0.8, 0.3); // (0.2,0.7,0.3,1.0) 反转
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.0), fastRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.45), fastRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(DefaultOpen.StartScale, KeyTime.FromPercent(1.0), fastRev));
+        return g;
+    }
+
+    /// <summary>位置关键帧（倒放）：0 → inertia（0-28%，打开"弹回"的逆）→ 0（28-45%，打开"滑出"的逆）
+    /// → from（45-100%，抛物线原路飞回锚点）。flyRev = 打开飞行段 KeySpline 的时间反转。</summary>
+    private static DoubleAnimationUsingKeyFrames BuildGlideReverse(double from, double inertia, KeySpline flyRev, Duration dur)
+    {
+        var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
+        var cRev = new KeySpline(0.4, 0.0, 0.6, 1.0); // 打开"弹回"段 (0.4,0,0.6,1) 自反
+        var bRev = new KeySpline(0.6, 0.0, 0.8, 1.0); // 打开"滑出"段 (0.2,0,0.4,1) 反转
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.0), cRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(inertia, KeyTime.FromPercent(0.28), cRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.45), bRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(from, KeyTime.FromPercent(1.0), flyRev));
+        return g;
+    }
+
+    /// <summary>惯性方向（沿飞行方向 2px）：飞行方向 = -flyFrom 归一化；打开落位后滑出、关闭飞回前的微动共用。</summary>
+    private static Point CalcInertia(Point flyFrom)
+    {
+        double len = Math.Max(Math.Abs(flyFrom.X), Math.Abs(flyFrom.Y));
+        return len > 0 ? new Point(-flyFrom.X / len * 2, -flyFrom.Y / len * 2) : new Point(0, 0);
     }
 
     /// <summary>关闭动画参数档。</summary>

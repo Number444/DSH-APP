@@ -118,10 +118,10 @@ public partial class MainWindow : Window
         TrayMenu.ItemClicked += OnTopMenuClicked;
 
         // 菜单"点击外部关闭"：三个 Popup 全部接入（打开时装钩子，关闭时自动卸载）
-        // 打开动画经 Opened 统一驱动：顶栏/余额从按钮上方抛出（(0,-20)），托盘按光标方向
-        MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -20)); };
+        // 打开动画经 Opened 统一驱动：顶栏/余额从按钮上方抛出（(0,-24)），托盘按光标方向
+        MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -24)); };
         MenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); BalanceMenu.PlayOpenAnimation(new Point(0, -20)); };
+        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); BalanceMenu.PlayOpenAnimation(new Point(0, -24)); };
         BalanceMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
         TrayMenuPopup.Opened += (_, _) => { InstallDismissHook(); TrayMenu.PlayOpenAnimation(_trayFlyFrom); };
         TrayMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
@@ -492,23 +492,18 @@ public partial class MainWindow : Window
 
     private void TitleBtnMenu_Click(object sender, RoutedEventArgs e) => MenuPopup.IsOpen = true;
 
-    /// <summary>菜单关闭统一入口：animated=true 播收拢动画（完成后置 IsOpen=false），false 瞬关（状态卡交接/隐藏退出路径）。
-    /// 收拢方向：托盘向光标方向（复用打开时的 _trayFlyFrom 方向），顶栏/余额向按钮（上方）。</summary>
+    /// <summary>菜单关闭统一入口：animated=true 播关闭动画（打开动画的倒放，完成后置 IsOpen=false），
+    /// false 瞬关（状态卡交接/隐藏退出路径）。倒放起点由 AppMenuPanel 内部记录（_lastFlyFrom）。</summary>
     private void AnimateMenuClose(Popup popup, AppMenuPanel panel, bool animated)
     {
         if (!popup.IsOpen) return;
-        if (animated) panel.PlayCloseAnimation(() => popup.IsOpen = false, ShrinkToOf(popup));
+        if (animated) panel.PlayCloseAnimation(() => popup.IsOpen = false);
         else popup.IsOpen = false;
     }
 
     /// <summary>Popup → 面板映射（外部点击钩子遍历用）。</summary>
     private AppMenuPanel PanelOf(Popup popup) =>
         popup == MenuPopup ? TopMenu : popup == BalanceMenuPopup ? BalanceMenu : TrayMenu;
-
-    /// <summary>收拢目标方向（DIP）：与打开时抛出方向一致（托盘指向光标，顶栏/余额指向按钮上方）。</summary>
-    private Point ShrinkToOf(Popup popup) => popup == TrayMenuPopup
-        ? new Point(Math.Sign(_trayFlyFrom.X) * 10, Math.Sign(_trayFlyFrom.Y) * 10)
-        : new Point(0, -10);
 
     /// <summary>公共菜单项路由：顶栏（TopMenu）、托盘（TrayMenu）、余额（BalanceMenu）共用。</summary>
     private async void OnTopMenuClicked(string tag)
@@ -699,10 +694,10 @@ public partial class MainWindow : Window
 
         TrayMenuPopup.HorizontalOffset = offsetX;
         TrayMenuPopup.VerticalOffset = offsetY;
-        // 抛出起点：菜单视觉位置在光标右/下方 → 从左/上方抛出（反向展开则反向），距离固定 10px
+        // 抛出起点：菜单视觉位置在光标右/下方 → 从左/上方抛出（反向展开则反向），距离固定 14px
         _trayFlyFrom = new Point(
-            offsetX + AppMenuPanel.AnimSafePad > x / scale ? -10 : 10,
-            offsetY + AppMenuPanel.AnimSafePad > y / scale ? -10 : 10);
+            offsetX + AppMenuPanel.AnimSafePad > x / scale ? -14 : 14,
+            offsetY + AppMenuPanel.AnimSafePad > y / scale ? -14 : 14);
         TrayMenuPopup.IsOpen = true;
     }
 
@@ -1331,6 +1326,8 @@ public partial class MainWindow : Window
             new("diagnostics", "诊断信息"),
         };
         AppendUpdateItems(items);
+        // 顶栏"退出"（与托盘一致）：退出整个 harness（壳 + dsh 服务）
+        items.Add(new AppMenuItem("exit", "退出"));
         TopMenu.ItemsSource = items;
         UpdateTrayMenuItems(); // 托盘更新项与顶栏联动
     }
