@@ -110,21 +110,28 @@
                 </Border>
             </Popup>
 
-            <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响；内容为公共菜单控件） -->
+            <!-- 菜单下拉（Popup 独立 HWND，不受 WebView2 airspace 影响；内容为公共菜单控件）。
+                 StaysOpen=True：所有外部点击统一走全局钩子关闭（动画收拢）；若用 StaysOpen=False，
+                 点击 WPF 区域会触发 Popup 内部自动关闭，绕过动画直接瞬关（v1.3.1 实测）。
+                 安全区留白（AppMenuPanel.AnimSafePad=40）让出动画空间，故定位需反向补偿 offset。 -->
             <Popup x:Name="MenuPopup"
                    Placement="Bottom"
                    PlacementTarget="{Binding ElementName=TitleBtnMenu}"
                    AllowsTransparency="True"
-                   StaysOpen="False">
+                   StaysOpen="True"
+                   HorizontalOffset="-40"
+                   VerticalOffset="-40">
                 <views:AppMenuPanel x:Name="TopMenu" />
             </Popup>
 
-            <!-- 余额左键菜单：刷新余额 / 打开充值页（右键交互已删除；点击外部自动关闭） -->
+            <!-- 余额左键菜单：刷新余额 / 打开充值页（右键交互已删除；关闭统一走钩子/显式，动画收拢） -->
             <Popup x:Name="BalanceMenuPopup"
                    Placement="Bottom"
                    PlacementTarget="{Binding ElementName=TitleBalance}"
                    AllowsTransparency="True"
-                   StaysOpen="False">
+                   StaysOpen="True"
+                   HorizontalOffset="-40"
+                   VerticalOffset="-40">
                 <views:AppMenuPanel x:Name="BalanceMenu" />
             </Popup>
 
@@ -132,7 +139,7 @@
             <Popup x:Name="TrayMenuPopup"
                    Placement="AbsolutePoint"
                    AllowsTransparency="True"
-                   StaysOpen="False">
+                   StaysOpen="True">
                 <views:AppMenuPanel x:Name="TrayMenu" />
             </Popup>
 

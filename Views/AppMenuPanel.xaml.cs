@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,9 +10,14 @@ namespace dsh_app.Views;
 /// 通用下拉菜单面板：渲染 AppMenuItem 列表（MenuItemButton 样式），点击经 ItemClicked 路由。
 /// 顶栏菜单 Popup 与托盘右键 ContextMenu 均基于同一视觉。
 /// 代码生成按钮以支持每项独立 Foreground（高亮）与 IsEnabled（进行中置灰）。
+/// 打开/关闭动画委托 PopupAnimator（与余额状态卡等所有 Popup 复用同一套实现）。
 /// </summary>
 public partial class AppMenuPanel : UserControl
 {
+    /// <summary>动画安全区（DIP）：RootCard 外层的透明留白，防抛出/过冲被 Popup HWND 裁切。
+    /// 与 PopupAnimator 的过冲幅度（≈10%）与抛出距离（≤24px）配套；定位代码须同步减此留白。</summary>
+    public const double AnimSafePad = 40;
+
     public AppMenuPanel()
     {
         InitializeComponent();
@@ -52,4 +58,11 @@ public partial class AppMenuPanel : UserControl
             ItemsHost.Children.Add(btn);
         }
     }
+
+    /// <summary>打开动画（抛出放大 + 模糊渐清 + 惯性回弹）：flyFrom = 抛出起点相对最终位置的偏移（DIP）。</summary>
+    public void PlayOpenAnimation(Point flyFrom) => PopupAnimator.PlayOpen(RootCard, flyFrom);
+
+    /// <summary>关闭动画（向 shrinkTo 方向收拢 + 模糊 + 渐隐），完成后回调（主窗口在回调里置 IsOpen=false）。</summary>
+    public void PlayCloseAnimation(Action? done = null, Point? shrinkTo = null) =>
+        PopupAnimator.PlayClose(RootCard, done, null, shrinkTo);
 }

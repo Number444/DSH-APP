@@ -16,6 +16,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using dsh_app.Helpers;
 using dsh_app.Server;
+using dsh_app.Views;
 using Microsoft.Web.WebView2.Core;
 
 namespace dsh_app;
@@ -79,6 +80,8 @@ public partial class MainWindow : Window
     private bool _trayAvailable;
     /// <summary>钩子热路径遍历的菜单集合（static 避免每次点击分配数组）。</summary>
     private static readonly Popup[] MenuPopups = new Popup[3];
+    /// <summary>托盘菜单打开动画的抛出起点（相对菜单位置；由 OpenTrayMenu 按光标方向计算）。</summary>
+    private Point _trayFlyFrom;
 
     public MainWindow()
     {
@@ -115,12 +118,19 @@ public partial class MainWindow : Window
         TrayMenu.ItemClicked += OnTopMenuClicked;
 
         // 菜单"点击外部关闭"：三个 Popup 全部接入（打开时装钩子，关闭时自动卸载）
-        MenuPopup.Opened += (_, _) => InstallDismissHook();
+        // 打开动画经 Opened 统一驱动：顶栏/余额从按钮上方抛出（(0,-20)），托盘按光标方向
+        MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -20)); };
         MenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        BalanceMenuPopup.Opened += (_, _) => InstallDismissHook();
+        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); BalanceMenu.PlayOpenAnimation(new Point(0, -20)); };
         BalanceMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        TrayMenuPopup.Opened += (_, _) => InstallDismissHook();
+        TrayMenuPopup.Opened += (_, _) => { InstallDismissHook(); TrayMenu.PlayOpenAnimation(_trayFlyFrom); };
         TrayMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
+        // 余额状态卡：轻量档打开动画（淡入 + 轻放大，无位移无弹性）
+        BalanceStatusPopup.Opened += (_, _) =>
+        {
+            if (BalanceStatusPopup.Child is FrameworkElement child)
+                PopupAnimator.PlayOpen(child, options: PopupAnimator.LightOpen);
+        };
 
         // 系统托盘：图标/事件（失败静默，不影响主流程）
         InitTray();
@@ -482,12 +492,30 @@ public partial class MainWindow : Window
 
     private void TitleBtnMenu_Click(object sender, RoutedEventArgs e) => MenuPopup.IsOpen = true;
 
+    /// <summary>菜单关闭统一入口：animated=true 播收拢动画（完成后置 IsOpen=false），false 瞬关（状态卡交接/隐藏退出路径）。
+    /// 收拢方向：托盘向光标方向（复用打开时的 _trayFlyFrom 方向），顶栏/余额向按钮（上方）。</summary>
+    private void AnimateMenuClose(Popup popup, AppMenuPanel panel, bool animated)
+    {
+        if (!popup.IsOpen) return;
+        if (animated) panel.PlayCloseAnimation(() => popup.IsOpen = false, ShrinkToOf(popup));
+        else popup.IsOpen = false;
+    }
+
+    /// <summary>Popup → 面板映射（外部点击钩子遍历用）。</summary>
+    private AppMenuPanel PanelOf(Popup popup) =>
+        popup == MenuPopup ? TopMenu : popup == BalanceMenuPopup ? BalanceMenu : TrayMenu;
+
+    /// <summary>收拢目标方向（DIP）：与打开时抛出方向一致（托盘指向光标，顶栏/余额指向按钮上方）。</summary>
+    private Point ShrinkToOf(Popup popup) => popup == TrayMenuPopup
+        ? new Point(Math.Sign(_trayFlyFrom.X) * 10, Math.Sign(_trayFlyFrom.Y) * 10)
+        : new Point(0, -10);
+
     /// <summary>公共菜单项路由：顶栏（TopMenu）、托盘（TrayMenu）、余额（BalanceMenu）共用。</summary>
     private async void OnTopMenuClicked(string tag)
     {
-        MenuPopup.IsOpen = false;
-        BalanceMenuPopup.IsOpen = false;
-        TrayMenuPopup.IsOpen = false;
+        AnimateMenuClose(MenuPopup, TopMenu, true);
+        AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true);
+        AnimateMenuClose(TrayMenuPopup, TrayMenu, true);
         switch (tag)
         {
             case "about":
@@ -538,6 +566,8 @@ public partial class MainWindow : Window
                 OpenTopUpPage();
                 break;
             case "exit":
+                // 退出路径：瞬关菜单再关窗（不播收拢动画——窗口即将销毁，杜绝动画时序干扰退出）
+                CloseAllMenus();
                 _trayExitRequested = true;
                 Close();
                 break;
@@ -622,10 +652,10 @@ public partial class MainWindow : Window
     /// <summary>在托盘图标旁弹出右键菜单（复用公共菜单控件；紧贴鼠标展开，超屏自动反向——系统右键菜单同款行为）。</summary>
     private void OpenTrayMenu()
     {
-        // 已打开 → 再点关闭（toggle）
+        // 已打开 → 再点关闭（toggle，播收拢动画）
         if (TrayMenuPopup.IsOpen)
         {
-            TrayMenuPopup.IsOpen = false;
+            AnimateMenuClose(TrayMenuPopup, TrayMenu, true);
             return;
         }
 
@@ -652,21 +682,27 @@ public partial class MainWindow : Window
         double x = pt.X / scale;
         double y = pt.Y / scale;
 
-        // 菜单实际尺寸（Measure 实量，长文本项不会导致翻转判定失真）
+        // 菜单实际尺寸（Measure 实量，长文本项不会导致翻转判定失真；减去动画安全区留白得视觉尺寸）
         TrayMenu.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        double menuW = Math.Max(220, TrayMenu.DesiredSize.Width);
-        double menuH = TrayMenu.DesiredSize.Height;
+        double menuW = Math.Max(220, TrayMenu.DesiredSize.Width - 2 * AppMenuPanel.AnimSafePad);
+        double menuH = TrayMenu.DesiredSize.Height - 2 * AppMenuPanel.AnimSafePad;
 
         // 默认在鼠标右下方展开（紧贴）；右/下放不下则反向（图标在任务栏底部时菜单自然落在图标正上方）
-        double offsetX = x + 4;
-        if (offsetX + menuW > work.Right)
-            offsetX = x - menuW;
-        double offsetY = y + 4;
-        if (offsetY + menuH > work.Bottom)
-            offsetY = y - menuH;
+        // Popup 定位点是 HWND 左上角（含安全区留白），须反向补偿让视觉位置贴合光标；
+        // 超屏判定与抛出方向均用"视觉位置"（offsetX + 安全区）计算，不能直接比较补偿后的 offset
+        double offsetX = x + 4 - AppMenuPanel.AnimSafePad;
+        if (offsetX + AppMenuPanel.AnimSafePad + menuW > work.Right)
+            offsetX = x - menuW - 4 - AppMenuPanel.AnimSafePad;
+        double offsetY = y + 4 - AppMenuPanel.AnimSafePad;
+        if (offsetY + AppMenuPanel.AnimSafePad + menuH > work.Bottom)
+            offsetY = y - menuH - 4 - AppMenuPanel.AnimSafePad;
 
         TrayMenuPopup.HorizontalOffset = offsetX;
         TrayMenuPopup.VerticalOffset = offsetY;
+        // 抛出起点：菜单视觉位置在光标右/下方 → 从左/上方抛出（反向展开则反向），距离固定 10px
+        _trayFlyFrom = new Point(
+            offsetX + AppMenuPanel.AnimSafePad > x / scale ? -10 : 10,
+            offsetY + AppMenuPanel.AnimSafePad > y / scale ? -10 : 10);
         TrayMenuPopup.IsOpen = true;
     }
 
@@ -753,8 +789,18 @@ public partial class MainWindow : Window
                                 if (!popup.IsOpen) continue;
                                 if (IsAnchorHit(popup, pt)) continue; // 锚点命中：交给按钮 toggle
                                 var rect = GetPopupScreenRect(popup);
-                                if (!rect.IsEmpty && !rect.Contains(pt))
-                                    popup.IsOpen = false;
+                                if (!rect.IsEmpty)
+                                {
+                                    // 动画安全区（透明留白）不算"菜单内"：内缩后判定，点击留白即外部关闭。
+                                    // DPI 取 Popup 自身所在显示器（Child 的 DPI 上下文），混 DPI 下内缩量才准确
+                                    double dpi = popup.Child is FrameworkElement fe
+                                        ? VisualTreeHelper.GetDpi(fe).PixelsPerDip
+                                        : VisualTreeHelper.GetDpi(this).PixelsPerDip;
+                                    double padPx = AppMenuPanel.AnimSafePad * dpi;
+                                    rect.Inflate(-padPx, -padPx);
+                                    if (!rect.Contains(pt))
+                                        AnimateMenuClose(popup, PanelOf(popup), true);
+                                }
                             }
                             UninstallDismissHookIfIdle();
                         }
@@ -1429,7 +1475,13 @@ public partial class MainWindow : Window
         }
         await Task.Delay(stayMs);
         if (seq == _statusSeq)
-            BalanceStatusPopup.IsOpen = false;
+        {
+            // 自动消失播轻量淡出（Popup 关闭即销毁，必须先动画后关）
+            if (BalanceStatusPopup.Child is FrameworkElement fadeChild)
+                PopupAnimator.PlayClose(fadeChild, () => BalanceStatusPopup.IsOpen = false, PopupAnimator.LightClose);
+            else
+                BalanceStatusPopup.IsOpen = false;
+        }
     }
 
     /// <summary>按下反馈：余额按钮内容轻微缩小（配合 Click 的弹性弹回，构成点击动效）。</summary>
@@ -1462,7 +1514,10 @@ public partial class MainWindow : Window
     {
         if (TitleBalance.Visibility != Visibility.Visible) return;
         // 弹回动效已在 PreviewMouseUp 统一处理（含按下拖出场景）；此处只做菜单开关
-        BalanceMenuPopup.IsOpen = !BalanceMenuPopup.IsOpen;
+        if (BalanceMenuPopup.IsOpen)
+            AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true);
+        else
+            BalanceMenuPopup.IsOpen = true;
     }
 
     private void TitleBtnMin_Click(object sender, RoutedEventArgs e)
@@ -1614,9 +1669,9 @@ public partial class MainWindow : Window
     /// <summary>关闭全部菜单 Popup 与余额状态卡（隐藏/退出/强制退出时调用，触发 Closed 自然卸钩）。</summary>
     private void CloseAllMenus()
     {
-        MenuPopup.IsOpen = false;
-        BalanceMenuPopup.IsOpen = false;
-        TrayMenuPopup.IsOpen = false;
+        AnimateMenuClose(MenuPopup, TopMenu, false);
+        AnimateMenuClose(BalanceMenuPopup, BalanceMenu, false);
+        AnimateMenuClose(TrayMenuPopup, TrayMenu, false);
         BalanceStatusPopup.IsOpen = false;
         UninstallDismissHookIfIdle();
     }
