@@ -30,6 +30,7 @@ public partial class MainWindow : Window
 
     private readonly ServerController _server = new();
     private readonly HarnessUpdater _updater = new();
+    private readonly AppUpdater _appUpdater = new();
     private readonly BalanceMonitor _balance = new();
     private readonly ObservableCollection<StepRow> _steps = new();
     private readonly DispatcherTimer _heartbeat;
@@ -40,6 +41,18 @@ public partial class MainWindow : Window
     private bool _updating;
     private bool _balanceRunning;
     private bool _abortUpdateConfirmed;
+    /// <summary>应用（壳自身）更新状态机：检查中 / 下载安装中 / 已下载待安装（与 Harness 的 _checking/_updating 完全拆分，统一入口守卫）。</summary>
+    private bool _appChecking;
+    private bool _appUpdating;
+    private bool _appUpdateReady;
+    /// <summary>应用自更新重启放行：OnClosing 在托盘化分支前短路（否则默认托盘化会拦截 Close，更新器空等超时）。</summary>
+    private bool _quitForAppUpdate;
+    /// <summary>应用自更新自动检查防重入（独立于 Harness 的 _autoCheckRan）。</summary>
+    private bool _appAutoCheckRan;
+    /// <summary>应用更新下载取消令牌（托盘化不取消；真退出/取消按钮才 Cancel）。</summary>
+    private CancellationTokenSource? _appDownloadCts;
+    /// <summary>手动检查更新的进度弹窗（非模态；检查完成自动关闭，防"按钮变灰干等"）。</summary>
+    private Views.UpdateProgressWindow? _checkProgress;
     /// <summary>托盘"退出"请求：跳过最小化到托盘拦截，真正退出。</summary>
     private bool _trayExitRequested;
     /// <summary>首次隐藏到托盘时是否已提示。</summary>
@@ -70,6 +83,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        VersionFooter.Text = $"dsh-app v{App.AppVersion} · DeepSeek Harness 桌面壳";
 
         _server.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
         _server.StepChanged += (step, status, detail) => Dispatcher.Invoke(() => UpdateStep(step, status, detail));
@@ -77,6 +91,9 @@ public partial class MainWindow : Window
 
         // Harness 更新器：日志走同一通道
         _updater.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
+
+        // 应用（壳自身）更新器：日志走同一通道
+        _appUpdater.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
 
         // 余额监控：回调经 Dispatcher 上 UI（R4 线程铁律）
         _balance.BalanceChanged += text => Dispatcher.Invoke(() => OnBalanceChanged(text));
@@ -153,6 +170,31 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             ShowError("初始化失败", ex.Message);
+        }
+
+        // 上次应用自更新回滚提示（标记由更新器脚本写入；展示后删除）
+        CheckRolledBackFlag();
+    }
+
+    /// <summary>检测 update\rolled-back.flag：更新器回滚后弹说明，用户不能无声无息。</summary>
+    private void CheckRolledBackFlag()
+    {
+        try
+        {
+            var flag = Path.Combine(AppUpdater.UpdateDir, "rolled-back.flag");
+            if (!File.Exists(flag)) return;
+            File.Delete(flag);
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                if (!IsVisible) return;
+                new Views.ConfirmDialog("更新回滚",
+                    $"上次应用更新未能完成，已自动回滚到 v{App.AppVersion}。\n详情见日志（updater.log）。",
+                    "知道了", glyph: "⚠") { Owner = this }.ShowDialog();
+            });
+        }
+        catch
+        {
+            // 检测失败静默
         }
     }
 
@@ -457,8 +499,14 @@ public partial class MainWindow : Window
             case "log":
                 OpenLog();
                 break;
+            case "diagnostics":
+                new Views.DiagnosticsWindow(_server, _updater, _appUpdater) { Owner = this }.ShowDialog();
+                break;
             case "checkupdate":
                 _ = CheckUpdateAsync();
+                break;
+            case "checkappupdate":
+                _ = CheckAppUpdateAsync();
                 break;
             case "show":
                 ShowMainWindow();
@@ -515,6 +563,22 @@ public partial class MainWindow : Window
         // 抢焦点：窗口从后台/隐藏恢复时置顶闪回（先置顶再取消，仅抢激活）
         Topmost = true;
         Topmost = false;
+
+        // 应用更新已下载完成（托盘化期间下载继续）：恢复窗口时提示安装
+        if (_appUpdateReady)
+        {
+            _appUpdateReady = false;
+            UpdateMenuItems();
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                if (!IsVisible) return;
+                var dlg = new Views.ConfirmDialog("应用更新已就绪",
+                    $"已下载 v{_appUpdater.LatestVersion}。是否现在重启应用完成更新？\n重启时服务短暂中断（约 10~30 秒）。",
+                    "立即重启", "稍后") { Owner = this };
+                if (dlg.ShowDialog() == true)
+                    InstallDownloadedAppUpdate();
+            });
+        }
     }
 
     /// <summary>打开 DeepSeek 开放平台充值页（默认浏览器）。</summary>
@@ -758,27 +822,73 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>托盘菜单项：打开主窗口 / 检查更新 / 设置 / 退出（检查更新状态与顶栏同步）。</summary>
+    /// <summary>托盘菜单项：打开主窗口 / 检查 Harness 更新 / 检查应用更新 / 诊断信息 / 设置 / 退出（状态与顶栏同步）。</summary>
     private void UpdateTrayMenuItems()
     {
-        var items = new List<AppMenuItem>();
-        items.Add(new AppMenuItem("show", "打开主窗口"));
-        if (_updating)
-            items.Add(new AppMenuItem("checkupdate", "正在更新 Harness…", Enabled: false));
-        else if (_checking)
-            items.Add(new AppMenuItem("checkupdate", "检查更新…", Enabled: false));
-        else if (_updater.LastCheckSucceeded && _updater.HasUpdate)
-            items.Add(new AppMenuItem("checkupdate",
-                $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}",
-                (Brush)FindResource("AccentBlueBrush")));
-        else
-            items.Add(new AppMenuItem("checkupdate", "检查更新"));
+        var items = new List<AppMenuItem>
+        {
+            new("show", "打开主窗口"),
+        };
+        AppendUpdateItems(items);
+        items.Add(new AppMenuItem("diagnostics", "诊断信息"));
         items.Add(new AppMenuItem("settings", "设置"));
         items.Add(new AppMenuItem("exit", "退出"));
         TrayMenu.ItemsSource = items;
     }
 
+    /// <summary>
+    /// 构建两个更新菜单项（Harness + 应用），顶栏/托盘共用。
+    /// 统一入口守卫：任一检查/更新进行中，两个更新入口均禁用（防"下载中再触发更新"、弹窗叠加、停服交错）。
+    /// </summary>
+    private void AppendUpdateItems(List<AppMenuItem> items)
+    {
+        var anyBusy = _checking || _updating || _appChecking || _appUpdating;
+
+        // Harness（npm 包）更新项
+        if (_updating)
+            items.Add(new AppMenuItem("checkupdate", "正在更新 Harness…", Enabled: false));
+        else if (_checking)
+            items.Add(new AppMenuItem("checkupdate", "检查 Harness 更新…", Enabled: false));
+        else if (_updater.LastCheckSucceeded && _updater.HasUpdate)
+            items.Add(new AppMenuItem("checkupdate",
+                $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}",
+                (Brush)FindResource("AccentBlueBrush")));
+        else
+            items.Add(new AppMenuItem("checkupdate", "检查 Harness 更新", Enabled: !anyBusy));
+
+        // 应用（壳自身）更新项
+        if (_appUpdating)
+            items.Add(new AppMenuItem("checkappupdate", "正在更新应用…", Enabled: false));
+        else if (_appUpdateReady)
+            items.Add(new AppMenuItem("checkappupdate",
+                $"更新就绪：v{_appUpdater.LocalVersion} → v{_appUpdater.LatestVersion}",
+                (Brush)FindResource("AccentBlueBrush"), Enabled: !anyBusy));
+        else if (_appChecking)
+            items.Add(new AppMenuItem("checkappupdate", "检查应用更新…", Enabled: false));
+        else if (_appUpdater.LastCheckSucceeded && _appUpdater.HasUpdate)
+            items.Add(new AppMenuItem("checkappupdate",
+                $"更新可用：v{_appUpdater.LocalVersion} → v{_appUpdater.LatestVersion}",
+                (Brush)FindResource("AccentBlueBrush"), Enabled: !anyBusy));
+        else
+            items.Add(new AppMenuItem("checkappupdate", "检查应用更新", Enabled: !anyBusy));
+    }
+
     // ---------------- 菜单（Harness 更新） ----------------
+
+    /// <summary>弹出检查进度窗（非模态，Owner 主窗口；重复调用先关旧的）。</summary>
+    private void ShowCheckProgress(string title, string detail)
+    {
+        _checkProgress?.Close();
+        _checkProgress = new Views.UpdateProgressWindow(title, detail) { Owner = this };
+        _checkProgress.Show();
+    }
+
+    /// <summary>关闭检查进度窗（幂等）。</summary>
+    private void HideCheckProgress()
+    {
+        _checkProgress?.Close();
+        _checkProgress = null;
+    }
 
     /// <summary>检查 Harness 更新：顶栏菜单与托盘菜单共用入口。防重入，状态经 UpdateMenuItems 反映。</summary>
     private async Task CheckUpdateAsync()
@@ -786,10 +896,12 @@ public partial class MainWindow : Window
         if (_checking || _updating) return;
         _checking = true;
         UpdateMenuItems(); // "检查更新…"禁用态
+        ShowCheckProgress("检查更新", "正在检查 Harness 更新…");
         try
         {
             // 手动点击一律重新检查（不复用启动时的陈旧结果，审查加固项）
             var ok = await _updater.CheckAsync();
+            HideCheckProgress(); // 检查完成：先关进度窗再弹结果
             if (!ok)
             {
                 new Views.ConfirmDialog("检查更新",
@@ -821,6 +933,7 @@ public partial class MainWindow : Window
         {
             // fire-and-forget 入口：检查期间退出（HarnessUpdater.Dispose 释放管道流）会抛
             // ObjectDisposedException——必须在此兜住，否则直达 DispatcherUnhandledException 崩溃
+            HideCheckProgress();
             AppendLog($"检查更新异常：{ex.Message}");
         }
         finally
@@ -905,6 +1018,260 @@ public partial class MainWindow : Window
             // 后台检查失败不打扰用户（写日志即可）；防 async void 未处理异常
             AppendLog($"自动检查更新异常：{ex.Message}");
         }
+
+        // 应用（壳自身）自动检查：独立防重入标志，与 Harness 互不干扰
+        if (_appAutoCheckRan || _appUpdating || !AppSettings.Current.AutoCheckAppUpdate) return;
+        _appAutoCheckRan = true;
+        try
+        {
+            var ok = await _appUpdater.CheckAsync();
+            if (ok && _appUpdater.HasUpdate)
+            {
+                AppendLog($"发现应用新版本：v{_appUpdater.LocalVersion} → v{_appUpdater.LatestVersion}");
+                UpdateMenuItems();
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"自动检查应用更新异常：{ex.Message}");
+        }
+    }
+
+    // ---------------- 菜单（应用更新：壳自身，GitHub Releases） ----------------
+
+    /// <summary>检查应用更新：顶栏菜单与托盘菜单共用入口。防重入；就绪态（已下载待安装）时点击直接走安装确认。</summary>
+    private async Task CheckAppUpdateAsync()
+    {
+        if (_appChecking || _appUpdating) return;
+        if (_appUpdateReady)
+        {
+            _appUpdateReady = false;
+            UpdateMenuItems();
+            ConfirmInstallAppUpdate();
+            return;
+        }
+
+        _appChecking = true;
+        UpdateMenuItems(); // "检查应用更新…"禁用态
+        ShowCheckProgress("检查应用更新", "正在检查应用更新（GitHub Releases）…");
+        try
+        {
+            // 手动点击一律重新检查（不复用启动时的陈旧结果）
+            var ok = await _appUpdater.CheckAsync();
+            HideCheckProgress(); // 检查完成：先关进度窗再弹结果
+            if (!ok)
+            {
+                new Views.ConfirmDialog("检查应用更新",
+                    $"检查更新失败：{_appUpdater.LastError ?? "未知原因"}。\n详情见日志。",
+                    "知道了", glyph: "⚠") { Owner = this }.ShowDialog();
+                return;
+            }
+
+            if (_appUpdater.HasUpdate)
+            {
+                var dlg = new Views.ConfirmDialog("发现新版本",
+                    $"当前版本：v{_appUpdater.LocalVersion}\n最新版本：v{_appUpdater.LatestVersion}\n\n" +
+                    "下载期间服务不受影响；下载完成后应用将自动重启完成更新，重启时服务短暂中断（约 10~30 秒）。是否继续？",
+                    "下载更新", "暂不") { Owner = this };
+                if (dlg.ShowDialog() == true)
+                    await RunAppUpdateAsync();
+            }
+            else
+            {
+                new Views.ConfirmDialog("检查应用更新",
+                    $"已是最新版本（v{_appUpdater.LocalVersion}）。",
+                    "知道了", glyph: "ℹ") { Owner = this }.ShowDialog();
+            }
+        }
+        catch (Exception ex)
+        {
+            // fire-and-forget 入口：检查期间退出（AppUpdater.Dispose）会抛 ObjectDisposedException，必须兜住
+            HideCheckProgress();
+            AppendLog($"检查应用更新异常：{ex.Message}");
+        }
+        finally
+        {
+            _appChecking = false;
+            UpdateMenuItems();
+        }
+    }
+
+    /// <summary>安装确认弹窗（就绪态入口）：确认后走安装段。</summary>
+    private void ConfirmInstallAppUpdate()
+    {
+        var dlg = new Views.ConfirmDialog("应用更新已就绪",
+            $"已下载 v{_appUpdater.LatestVersion}。是否现在重启应用完成更新？\n重启时服务短暂中断（约 10~30 秒）。",
+            "立即重启", "稍后") { Owner = this };
+        if (dlg.ShowDialog() == true)
+            InstallDownloadedAppUpdate();
+    }
+
+    /// <summary>
+    /// 应用更新完整流程：R1 收起页面 → 覆盖层下载（进度 + 日志 + 取消按钮）→ 校验 → 安装段。
+    /// 下载不打断服务；托盘化（Hide）期间下载继续，完成置 _appUpdateReady（恢复窗口时确认）。
+    /// </summary>
+    private async Task RunAppUpdateAsync()
+    {
+        if (_appUpdating) return;
+        _appUpdating = true;
+        TitleBtnRestart.IsEnabled = false;
+        _appDownloadCts = new CancellationTokenSource();
+        UpdateMenuItems();
+        try
+        {
+            // R1：WebView2 是 HWND 子窗口，覆盖层盖不住它——必须先收起页面
+            WebView.Visibility = Visibility.Collapsed;
+            ShowLoading();
+            CenterSubtitle.Text = "正在下载应用更新…";
+            ShowCancelDownloadButton();
+
+            var ok = await _appUpdater.DownloadAndVerifyAsync(OnAppDownloadProgress, _appDownloadCts.Token);
+            HideCancelDownloadButton();
+            if (!ok)
+            {
+                if (_appDownloadCts.IsCancellationRequested)
+                {
+                    AppendLog("应用更新下载已取消");
+                    RestoreAfterCancelledDownload();
+                    return;
+                }
+                ShowError("更新失败",
+                    $"下载或校验失败：{_appUpdater.LastError ?? "详情见日志"}。\n服务未受影响，可稍后重试。",
+                    allowRetry: false);
+                return;
+            }
+
+            // 下载完成：窗口可见 → 立即安装确认；窗口隐藏（托盘化）→ 气泡 + 待安装状态
+            if (!IsVisible)
+            {
+                _appUpdateReady = true;
+                UpdateMenuItems();
+                try
+                {
+                    TrayIcon.ShowBalloonTip("DeepSeek Harness",
+                        $"应用更新已下载完成（v{_appUpdater.LatestVersion}），恢复窗口后安装。",
+                        Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"托盘提示失败: {ex.Message}");
+                }
+                return;
+            }
+
+            InstallDownloadedAppUpdate();
+        }
+        catch (Exception ex)
+        {
+            ShowError("更新失败", ex.Message, allowRetry: false);
+        }
+        finally
+        {
+            // 仅未进入重启路径时复位状态（进入重启路径后 _quitForAppUpdate=true，走 OnClosing 放行退出）
+            if (!_quitForAppUpdate)
+            {
+                _appUpdating = false;
+                TitleBtnRestart.IsEnabled = true;
+                UpdateMenuItems();
+            }
+        }
+    }
+
+    /// <summary>安装段：生成更新器脚本 → 启动脚本（不等待）→ 放行退出。更新器在旧实例退出后覆盖 exe 并重启。</summary>
+    private void InstallDownloadedAppUpdate()
+    {
+        _appUpdating = true;
+        TitleBtnRestart.IsEnabled = false;
+        _appDownloadCts = null;
+        UpdateMenuItems();
+        try
+        {
+            if (WebView.Visibility == Visibility.Visible)
+            {
+                // R1：收起页面（覆盖层可见）
+                WebView.Visibility = Visibility.Collapsed;
+            }
+            ShowLoading();
+            CenterSubtitle.Text = "正在准备更新…";
+
+            var scriptPath = _appUpdater.WriteUpdateScript(_server.Port);
+            if (scriptPath is null)
+            {
+                ShowError("更新失败", _appUpdater.LastError ?? "无法生成更新脚本。", allowRetry: false);
+                return;
+            }
+
+            // 启动更新器（隐藏窗口，不等待；ArgumentList 传参免引号转义问题）
+            var psi = new ProcessStartInfo("powershell.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-ExecutionPolicy");
+            psi.ArgumentList.Add("Bypass");
+            psi.ArgumentList.Add("-WindowStyle");
+            psi.ArgumentList.Add("Hidden");
+            psi.ArgumentList.Add("-File");
+            psi.ArgumentList.Add(scriptPath);
+            Process.Start(psi);
+
+            AppendLog("更新器已启动，应用即将重启完成更新");
+            _quitForAppUpdate = true; // OnClosing 放行真退出（托盘化分支前短路）
+            Close();
+        }
+        catch (Exception ex)
+        {
+            // 更新器启动失败：不退出应用，恢复 UI 与状态（服务不受影响）
+            AppendLog($"启动更新器失败：{ex.Message}");
+            ShowError("更新失败", $"无法启动更新器：{ex.Message}\n服务未受影响，可稍后重试。", allowRetry: false);
+        }
+        finally
+        {
+            if (!_quitForAppUpdate)
+            {
+                _appUpdating = false;
+                TitleBtnRestart.IsEnabled = true;
+                UpdateMenuItems();
+            }
+        }
+    }
+
+    /// <summary>下载进度回调（AppUpdater 已节流 250ms）：更新覆盖层副标题，不阻塞下载线程。</summary>
+    private void OnAppDownloadProgress(long read, long total)
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (!IsVisible) return;
+            CenterSubtitle.Text = total > 0
+                ? $"正在下载应用更新… {read / 1048576.0:F1} / {total / 1048576.0:F0} MB（{read * 100 / total}%）"
+                : $"正在下载应用更新… {read / 1048576.0:F1} MB";
+        });
+    }
+
+    /// <summary>取消下载后恢复：隐藏覆盖层、恢复页面、菜单复位（状态复位在调用方 finally）。</summary>
+    private void RestoreAfterCancelledDownload()
+    {
+        HideOverlay();
+        WebView.Visibility = Visibility.Visible;
+    }
+
+    private void CancelDownloadButton_Click(object sender, RoutedEventArgs e)
+    {
+        _appDownloadCts?.Cancel();
+        CancelDownloadButton.IsEnabled = false;
+        CenterSubtitle.Text = "正在取消下载…";
+    }
+
+    private void ShowCancelDownloadButton()
+    {
+        CancelDownloadButton.Visibility = Visibility.Visible;
+        CancelDownloadButton.IsEnabled = true;
+    }
+
+    private void HideCancelDownloadButton()
+    {
+        CancelDownloadButton.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>重建顶栏/托盘菜单项：有新版时高亮提示（主题色走资源，R8），检查/更新中显示进行态。</summary>
@@ -915,29 +1282,11 @@ public partial class MainWindow : Window
             new("about", "关于"),
             new("settings", "设置"),
             new("log", "日志"),
+            new("diagnostics", "诊断信息"),
         };
-
-        if (_updating)
-        {
-            items.Add(new AppMenuItem("checkupdate", "正在更新 Harness…", Enabled: false));
-        }
-        else if (_checking)
-        {
-            items.Add(new AppMenuItem("checkupdate", "检查更新…", Enabled: false));
-        }
-        else if (_updater.LastCheckSucceeded && _updater.HasUpdate)
-        {
-            items.Add(new AppMenuItem("checkupdate",
-                $"更新可用：v{_updater.LocalVersion} → v{_updater.LatestVersion}",
-                (Brush)FindResource("AccentBlueBrush")));
-        }
-        else
-        {
-            items.Add(new AppMenuItem("checkupdate", "检查更新"));
-        }
-
+        AppendUpdateItems(items);
         TopMenu.ItemsSource = items;
-        UpdateTrayMenuItems(); // 托盘"检查更新"项与顶栏联动
+        UpdateTrayMenuItems(); // 托盘更新项与顶栏联动
     }
 
     // ---------------- 顶栏余额显示 ----------------
@@ -1220,10 +1569,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 应用自更新重启放行：更新器已启动，必须真退出
+        // （否则默认"最小化到托盘"会 e.Cancel+Hide 拦截 Close，更新器等不到进程退出 60s 超时放弃覆盖——静默失败）
+        if (_quitForAppUpdate)
+        {
+            CloseAllMenus();
+            return;
+        }
+
         // 最小化到托盘：隐藏窗口，服务继续运行（托盘菜单"退出"、设置关闭该行为、
         // 更新中断确认后（_abortUpdateConfirmed）或托盘不可用（_trayAvailable=false）才真正退出）
         if (AppSettings.Current.MinimizeToTrayOnClose && !_trayExitRequested && !_abortUpdateConfirmed && _trayAvailable)
         {
+            // 托盘化不取消应用下载（后台继续，完成置 _appUpdateReady，恢复窗口时确认）
             e.Cancel = true;
             CloseAllMenus(); // Popup 是独立 HWND：不关则残留屏幕，钩子也保持常驻
             Hide();
@@ -1243,6 +1601,14 @@ public partial class MainWindow : Window
             }
             AppendLog("窗口最小化到托盘（服务继续运行）");
         }
+
+        // 走到这里 = 真退出（托盘"退出" / 关窗直退 / 设置关闭托盘化）：取消进行中的应用下载
+        // （下载无副作用：只写 update 临时文件，取消后由下次启动清理兜底）
+        if (_appUpdating && _appDownloadCts is not null)
+        {
+            _appDownloadCts.Cancel();
+            AppendLog("应用更新下载已取消（应用退出）");
+        }
     }
 
     /// <summary>关闭全部菜单 Popup 与余额状态卡（隐藏/退出/强制退出时调用，触发 Closed 自然卸钩）。</summary>
@@ -1257,11 +1623,13 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        HideCheckProgress(); // 主窗口关闭：进度窗一并关闭，防残留
         _server.Shutdown();
         _server.Dispose();
         _balance.Stop();
         _balance.Dispose();
         _updater.Dispose();
+        _appUpdater.Dispose();
         App.ActiveServer = null;
         try
         {

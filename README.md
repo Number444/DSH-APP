@@ -1,6 +1,6 @@
 # dsh-app — DeepSeek Harness 桌面壳
 
-> v1.2.0(2026-08-14)
+> v1.3.0(2026-08-14)
 
 把 DeepSeek Harness Web GUI 封装成独立 Windows 桌面应用(WPF + WebView2,纯壳零侵入)。
 
@@ -15,11 +15,13 @@
 - **断连检测**:自家进程崩溃(`ServerDied`)与接管服务心跳(30s×2 次)双通道
 - **接管身份验证**:外部 dsh 经 PID + 命令行双重验证后才接管清理,非 dsh 程序绝不误杀
 - **主题系统**:深色 / 浅色 / 跟随系统(读系统主题 + 实时监听),全 DynamicResource 动态切换
-- **Harness 更新**:顶栏菜单"检查更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);用户确认后停服 → `npm install -g` → 自动重启,全程日志可见
+- **Harness 更新**:顶栏菜单"检查 Harness 更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);用户确认后停服 → `npm install -g` → 自动重启,全程日志可见
+- **应用自更新**:顶栏菜单"检查应用更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);GitHub Releases 检查 → 下载(进度/可取消)→ SHA256 校验 → 更新器覆盖单 exe → 自动重启;失败自动回滚;托盘化期间下载继续
+- **诊断信息面板**:一键收集壳版本 / node 版本 / dsh 版本 / 端口 / 代理状态 / GitHub 连通性等,纯文本一键复制(绝不含任何凭据)
 - **顶栏余额显示**:菜单右侧常驻 DeepSeek 开放平台剩余资金(¥),60s 自动刷新;左键弹出菜单(刷新余额 / 打开充值页),刷新结果在按钮下方状态卡反馈;余额状态色:≥¥5 公共蓝 / ¥2~5 告警黄 / <¥2 危险红;API Key 经用户确认授权后自动读取 dsh 凭据,或设置页手动填写(DPAPI 加密)
 - **余额告警**:跌破阈值(默认 ¥5,可调)弹系统通知,点击通知直达充值页;仅跨越阈值提醒一次,不轰炸
-- **系统托盘**:关窗最小化到托盘(服务继续,默认开,设置可关)、双击恢复、右键菜单(打开主窗口 / 检查更新 / 设置 / 退出)、悬停显示实时余额
-- **菜单下拉**:关于 / 设置 / 检查更新(公共菜单控件,顶栏 / 托盘 / 余额三处同源;胶囊分段 + 滑块开关,套用 Toolbox 设计)
+- **系统托盘**:关窗最小化到托盘(服务继续,默认开,设置可关)、双击恢复、右键菜单(打开主窗口 / 检查 Harness 更新 / 检查应用更新 / 诊断信息 / 设置 / 退出)、悬停显示实时余额
+- **菜单下拉**:关于 / 设置 / 日志 / 诊断信息 / 检查 Harness 更新 / 检查应用更新(公共菜单控件,顶栏 / 托盘两处同源;胶囊分段 + 滑块开关,套用 Toolbox 设计)
 - **窗口记忆**:位置/尺寸/最大化状态持久化(防外接屏拔除后窗口丢失)
 - **自定义滚动条**:Toolbox 同款四档过渡(拖拽 > 悬停 Thumb > 悬停轨道 > 常态)
 
@@ -67,8 +69,11 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 - [ARCHITECTURE.md](ARCHITECTURE.md) — 架构、调用链路、设计决策
 - [docs/UI-GUIDELINES.md](docs/UI-GUIDELINES.md) — 窗口架构与 UI 规范(R1~R8 铁律)
 - [docs/UPDATE-MECHANISM.md](docs/UPDATE-MECHANISM.md) — Harness 更新机制设计（已实现）
+- [docs/SELF-UPDATE.md](docs/SELF-UPDATE.md) — 应用自更新机制设计（已实现）
+- [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md) — 诊断信息面板说明与敏感边界
 - [docs/BALANCE-DISPLAY.md](docs/BALANCE-DISPLAY.md) — 顶栏余额显示设计（已实现）
-- [docs/RELEASE.md](docs/RELEASE.md) — 发布流程（commit → 单 exe → push 由主人确定）
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — 版本变更记录
+- [docs/RELEASE.md](docs/RELEASE.md) — 发布流程（commit → 单 exe → push 由主人确定 → Release）
 
 ## 回退
 

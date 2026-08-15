@@ -10,9 +10,16 @@
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
+    <!-- 免 InformationalVersion 的 +sha 后缀（应用自更新版本号解析用） -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <!-- 更新器脚本模板：入库（scripts/apply-update.ps1，可读可测）+ 嵌入程序集（AppUpdater 运行时提取写盘） -->
+  <ItemGroup>
+    <EmbeddedResource Include="scripts\apply-update.ps1" LogicalName="dsh_app.Scripts.apply-update.ps1" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />

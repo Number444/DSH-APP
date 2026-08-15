@@ -38,6 +38,7 @@ public partial class SettingsWindow : Window
         UpdateEnabled();
 
         ChkAutoCheckUpdate.IsChecked = AppSettings.Current.AutoCheckUpdate;
+        ChkAutoCheckAppUpdate.IsChecked = AppSettings.Current.AutoCheckAppUpdate;
         ChkShowBalance.IsChecked = AppSettings.Current.ShowBalance;
         ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
         ChkBalanceAlert.IsChecked = AppSettings.Current.BalanceAlertEnabled;
@@ -73,6 +74,12 @@ public partial class SettingsWindow : Window
     private void OnAutoCheckUpdateChanged(object sender, RoutedEventArgs e)
     {
         AppSettings.Current.AutoCheckUpdate = ChkAutoCheckUpdate.IsChecked == true;
+        AppSettings.Current.Save();
+    }
+
+    private void OnAutoCheckAppUpdateChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.AutoCheckAppUpdate = ChkAutoCheckAppUpdate.IsChecked == true;
         AppSettings.Current.Save();
     }
 

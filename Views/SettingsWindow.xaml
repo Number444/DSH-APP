@@ -66,6 +66,17 @@
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}" />
 
+        <CheckBox x:Name="ChkAutoCheckAppUpdate"
+                  Content="启动时自动检查应用更新"
+                  Margin="0,10,0,0"
+                  Style="{DynamicResource ToggleSwitchStyle}"
+                  Checked="OnAutoCheckAppUpdateChanged"
+                  Unchecked="OnAutoCheckAppUpdateChanged" />
+        <TextBlock Text="后台静默检查 GitHub Releases，发现新版本时在顶栏菜单提示。"
+                   Margin="0,6,0,0"
+                   FontSize="11"
+                   Foreground="{DynamicResource TextWeakBrush}" />
+
         <!-- ==================== 常驻 ==================== -->
         <TextBlock Text="常驻"
                    Margin="0,16,0,0"

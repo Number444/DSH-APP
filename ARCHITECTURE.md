@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-14 · 版本 v1.2.0 · 本次更新:系统托盘(关窗最小化到托盘、托盘菜单)、余额告警阈值、余额右键充值、公共菜单控件 AppMenuPanel
+> 更新时间:2026-08-14 · 版本 v1.3.0 · 本次更新:诊断信息面板、应用自更新（GitHub Releases 覆盖单 exe、更新器脚本 + 自动回滚）、SemVer 提取共用
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -11,7 +11,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 2. 用 WebView2 在独立窗口里渲染 Harness UI
 3. 管理服务器生命周期(关窗默认最小化到托盘,服务继续;托盘"退出"才停服,仅停自己拉起的 + 接管验证过的)
 4. 提供启动状态、错误提示与断连检测
-5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、系统托盘常驻
+5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)
 
 壳与 Harness 的唯一接触面是 `http://127.0.0.1:3080`(HTTP 边界,零侵入)。
 这也是它对"已安装 dsh 的任意电脑"零适配可用的原因。
@@ -45,10 +45,13 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 
 | 模块 | 文件 | 职责 |
 |---|---|---|
-| App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化 |
-| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/检查更新/设置/关于）、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
+| App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化、`App.AppVersion`（壳版本）、启动清理 update 下载残留 |
+| 窗口层 | `MainWindow.xaml(.cs)` | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于）、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
-| 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较，超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
+| 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较（共用 `Helpers/SemVer.cs`），超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
+| 自更新层 | `Server/AppUpdater.cs` | 壳自身（dsh-app.exe）更新:GitHub Releases 检查（tag/资产校验 fail-closed）、流式下载 + 同遍 SHA256、磁盘预检、进度节流、更新器脚本生成（内嵌模板提取）;网络策略直连优先 + 7890 代理兜底重试 |
+| 诊断层 | `Helpers/Diagnostics.cs` + `Views/DiagnosticsWindow` | 环境与运行状态并行采集（node 版本/服务状态/代理/GitHub 连通性/设置项）,敏感边界:绝不含凭据;纯文本一键复制 |
+| 版本层 | `Helpers/SemVer.cs` | semver 比较（提取自 HarnessUpdater,Harness 与应用自更新共用;pre-release 规则,不误报） |
 | 余额层 | `Server/BalanceMonitor.cs` + `Helpers/CredentialsReader.cs` | DeepSeek 余额轮询（60s）、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
 | 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key），settings.json 持久化（Lazy + 原子替换） |
 | 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听；`ButtonBlueBrush`（主操作按钮，对比度达标） |
@@ -97,7 +100,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
   → WebView2 渲染 Harness 前端 → NavigationCompleted(IsSuccess)
       → WebView.Visibility=Visible → HideOverlay(150ms 淡出)→ 用户看到可对话界面
       → StartBalanceIfEnabled()(余额开启时启动 60s 轮询)
-      → MaybeAutoCheckUpdate()(自动检查开启时后台 npm view 一次,发现新版菜单高亮)
+      → MaybeAutoCheckUpdate()(自动检查开启时后台执行:Harness npm view 一次 + 应用 GitHub 检查一次,独立防重入,发现新版菜单高亮)
 ```
 
 ## 3. 运行时数据流
@@ -123,6 +126,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 导航失败 | `NavigationCompleted(!IsSuccess)` → 错误卡片 + 重试(重试先 Shutdown 再重新 Ensure) |
 | 更新中关窗 | `OnClosing` 拦截 + ConfirmDialog"中断并关闭/继续更新"；确认后 `AbortRunningNpm` 终止安装并关闭（半安装比跑完更危险）；`Dispose` 不杀进程 |
 | 更新失败 | 先 `EnsureServerAsync()` 恢复旧服务 → 错误卡 + `LastError` 原因 + 手动安装指引 |
+| 应用自更新下载中关窗 | 托盘化（Hide）不取消下载（后台继续，完成弹气泡 + 待安装，恢复窗口确认）；真退出（托盘"退出"/关窗直退）取消下载并清理；`_quitForAppUpdate` 放行更新重启的真退出 |
+| 应用自更新回滚 | 更新器 45s 双条件验证失败 → 终止新进程 → 备份覆盖回 → 启动旧版 → 写 `rolled-back.flag`；新实例启动检测到标记 → 弹说明窗（回滚不可无声无息） |
+| 更新器等待超时 | 旧实例 60s 未退出 → 放弃覆盖（.new 保留，日志说明），绝不半覆盖 |
 | 余额刷新失败 | 点击余额 → 状态卡"正在刷新…"→ 成功 ✓绿 / 失败 ✗红 / 防抖忽略 ⚠橙（仅用户点击场景弹窗，轮询静默） |
 | 未捕获异常 | `DispatcherUnhandledException` → 写日志 → 停服务器 → 提示 → 退出 |
 | 重复双击 | 第二实例 Mutex 冲突 → 激活第一个 → 退出码 0 |
@@ -141,6 +147,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 10. **最大化钳制（WM_GETMINMAXINFO）**——无边框窗口最大化时把位置/尺寸钳到所在显示器工作区（物理像素,系统层面生效）;不置 `handled` 让 WPF 继续写 MinWidth/MinHeight 约束;配合 `app.manifest` PerMonitorV2 修复混合 DPI 多屏错配与跨屏模糊
 11. **更新流程安全**——停服前置（文件句柄 EPERM）、装后版本验证（防 npm 静默失败）、`IsManaged` 前置（非 dsh 占端口拒绝）、更新中关窗拦截确认、`Dispose` 不杀进程（让安装跑完）
 12. **弹窗自绘体系**——`ConfirmDialog` 单/双按钮 + 类型 glyph（⚠/ℹ/✓）+ 破坏性红色模式;主操作按钮用 `ButtonBlueBrush`（深色 #1F6FEB 白字 4.6:1 达标,不用 #58A6FF 作按钮底）
+13. **应用自更新安全链**——运行中 exe 被锁 → 更新器脚本（PowerShell，内嵌资源模板）在旧实例退出后覆盖；下载同遍 SHA256 + .sha256 严格比对（fail-closed 不装未校验文件）；tag/资产校验 fail-closed；磁盘预检 600MB；更新器 45s 双条件验证（进程 + 端口）失败自动回滚 + 标记文件可见性；备份/清理职责全归脚本（应用启动只清下载残留，防回滚竞态）；`_quitForAppUpdate` 放行托盘拦截
+14. **两套更新状态机隔离**——Harness（_checking/_updating）与应用（_appChecking/_appUpdating）完全拆分 + 统一入口守卫（任一进行中两个入口均禁用），防互扰与弹窗叠加
+15. **诊断敏感边界**——只采集环境与状态：凭据只报授权布尔、代理只报连通、绝不输出 Key/.npmrc/token 值（复制内容逐字不含敏感信息）
 
 ## 6. 可移植性设计
 
@@ -148,13 +157,14 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 - **唯一例外(用户特批)**:余额显示功能在用户经确认弹窗**显式授权**后读取 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY`(仅内存使用、不落盘、可随时在设置页撤销);未授权一律回退环境变量/手动填写,绝无隐式读取
 - **端口可配置/容错**:默认 3080,并发探测 3080~3090
 - 日志与 WebView2 数据均在 `%LOCALAPPDATA%\dsh-app\`,不写安装目录,避免权限问题
+- 应用自更新目录 `%LOCALAPPDATA%\dsh-app\update\`:下载残留（*.part/*.new/*.sha256，启动清理）、backup/（更新器独占）、updater.log、rolled-back.flag、apply-update.ps1（运行时生成）
 
 ## 7. 日志与数据位置
 
 - 壳日志 + 服务器输出:`%LOCALAPPDATA%\dsh-app\app.log`
 - 服务器进程自身日志:`%LOCALAPPDATA%\dsh-app\server.log`(由 dsh web 输出,经 Log 事件落盘)
 - 窗口位置/尺寸/最大化状态:`%LOCALAPPDATA%\dsh-app\window.json`(还原前校验与虚拟屏有交集,防外接屏拔除后窗口不可见)
-- 设置:`%LOCALAPPDATA%\dsh-app\settings.json`(主题/自动检查更新/余额开关/凭据读取授权标记/手动 Key 的 DPAPI 密文,原子写入)
+- 设置:`%LOCALAPPDATA%\dsh-app\settings.json`(主题/自动检查更新/自动检查应用更新/余额开关/凭据读取授权标记/手动 Key 的 DPAPI 密文,原子写入)
 
 ## 8. 排除的备选方案(决策记录)
 

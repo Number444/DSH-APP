@@ -5,8 +5,11 @@ using dsh_app.Helpers;
 
 namespace dsh_app.Views;
 
-/// <summary>关于窗口：产品信息展示。</summary>
-public partial class AboutWindow : Window
+/// <summary>
+/// 轻量检查进度窗（非模态）：转圈 + 文案，检查完成由调用方关闭。
+/// 解决"点击检查更新后只有按钮变灰、用户干等"的反馈缺失（v1.3.0 反馈项）。
+/// </summary>
+public partial class UpdateProgressWindow : Window
 {
     private const int DWM_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
@@ -14,11 +17,14 @@ public partial class AboutWindow : Window
 
     private readonly Action<bool> _themeHandler;
 
-    public AboutWindow()
+    public UpdateProgressWindow(string title, string detail)
     {
         InitializeComponent();
-        VersionText.Text = $"dsh-app v{App.AppVersion}";
-        // 关闭时解除订阅，防泄漏
+        Title = title;
+        TitleText.Text = title;
+        DetailText.Text = detail;
+
+        // 主题切换时联动标题栏深色（关闭时解除，防订阅泄漏）
         _themeHandler = _ => ApplyDwm();
         ThemeManager.ThemeChanged += _themeHandler;
         Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;

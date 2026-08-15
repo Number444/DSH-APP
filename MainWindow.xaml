@@ -296,6 +296,21 @@
                                      Foreground="{DynamicResource AccentBlueBrush}"
                                      Background="{DynamicResource TrackBgBrush}" />
 
+                        <!-- 应用更新下载取消按钮（仅下载阶段可见） -->
+                        <Button x:Name="CancelDownloadButton"
+                                Content="取消下载"
+                                Margin="0,10,0,0"
+                                Padding="14,5"
+                                HorizontalAlignment="Left"
+                                FontSize="12"
+                                Style="{DynamicResource RoundedButton}"
+                                Background="{DynamicResource BgCardBrush}"
+                                Foreground="{DynamicResource TextPrimaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                Click="CancelDownloadButton_Click"
+                                Visibility="Collapsed" />
+
                         <!-- 实时日志（Toolbox 风格自定义滚动条） -->
                         <Grid Margin="0,10,0,0">
                             <Grid.ColumnDefinitions>
@@ -316,7 +331,8 @@
                                                      TargetScrollViewer="{Binding ElementName=OverlayLogScroller}" />
                         </Grid>
 
-                        <TextBlock Text="dsh-app v1.2 · DeepSeek Harness 桌面壳"
+                        <TextBlock x:Name="VersionFooter"
+                                   Text="dsh-app · DeepSeek Harness 桌面壳"
                                    Margin="0,8,0,0"
                                    FontSize="11"
                                    Foreground="{DynamicResource TextWeakBrush}" />

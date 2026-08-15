@@ -25,6 +25,9 @@ public sealed class AppSettings
     /// <summary>启动后自动检查 Harness 更新（默认开）。</summary>
     public bool AutoCheckUpdate { get; set; } = true;
 
+    /// <summary>启动后自动检查应用（壳自身）更新：GitHub Releases（默认开）。</summary>
+    public bool AutoCheckAppUpdate { get; set; } = true;
+
     /// <summary>顶栏显示余额（默认关）。</summary>
     public bool ShowBalance { get; set; }
 

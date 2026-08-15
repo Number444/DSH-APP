@@ -46,9 +46,9 @@
 | 拖动 | 顶栏空白区由 CaptionHeight 提供拖动与双击最大化，禁止手动 `DragMove()` 破坏该行为 |
 | **resize 热区** | `ResizeBorderThickness=5`；**内容区四周必须留出热区边距**（普通状态 `Margin 5,0,5,5`，最大化切 0）——WebView2 HWND 会拦截客户区边缘命中测试，不留边则侧/底无法调窗（airspace 的另一表现） |
 
-**工具按钮固定清单（4 个，勿删减，纯文字）**：刷新 / 浏览器 / 重启服务 / 菜单（下拉：关于、设置、日志、检查更新）。日志入口在菜单内（2026-08-14 自顶栏移入）。
+**工具按钮固定清单（4 个，勿删减，纯文字）**：刷新 / 浏览器 / 重启服务 / 菜单（下拉：关于、设置、日志、诊断信息、检查 Harness 更新、检查应用更新）。日志入口在菜单内（2026-08-14 自顶栏移入）。
 
-**下拉菜单公共控件**（v1.2.0）：菜单项渲染统一走 `Views/AppMenuPanel`（卡片容器 + `MenuItemButton` 项，点击经 `ItemClicked(Tag)` 路由）；**顶栏下拉、托盘右键、余额左键三处菜单全部同源**（均为 Popup + AppMenuPanel；v1.2.1 起托盘弃用 ContextMenu——系统 ContextMenu 的弹出动画/阴影/触发与 APP 内 Popup 菜单差异明显）。菜单项数据模型 `AppMenuItem(Tag, Content, Foreground?, Enabled?)`，高亮（更新可用蓝色）与禁用（检查/更新中）由 `MainWindow.UpdateMenuItems()` 重建列表驱动（托盘项经 `UpdateTrayMenuItems` 联动）。余额菜单（左键弹出）：刷新余额 / 打开充值页，刷新结果经余额按钮下方状态卡反馈；点击外部自动关闭（WH_MOUSE_LL 钩子，见 MainWindow 实现）。
+**下拉菜单公共控件**（v1.2.0）：菜单项渲染统一走 `Views/AppMenuPanel`（卡片容器 + `MenuItemButton` 项，点击经 `ItemClicked(Tag)` 路由）；**顶栏下拉、托盘右键、余额左键三处菜单全部同源**（均为 Popup + AppMenuPanel；v1.2.1 起托盘弃用 ContextMenu——系统 ContextMenu 的弹出动画/阴影/触发与 APP 内 Popup 菜单差异明显）。菜单项数据模型 `AppMenuItem(Tag, Content, Foreground?, Enabled?)`，高亮（更新可用蓝色）与禁用（检查/更新中）由 `MainWindow.UpdateMenuItems()` 重建列表驱动（托盘项经 `UpdateTrayMenuItems` 联动）。余额菜单（左键弹出）：刷新余额 / 打开充值页，刷新结果经余额按钮下方状态卡反馈；点击外部自动关闭（WH_MOUSE_LL 钩子，见 MainWindow 实现）。**两个更新入口**（v1.3.0）："检查 Harness 更新"（npm 包）与"检查应用更新"（壳自身，GitHub Releases）状态机完全拆分，任一检查/更新进行中两个入口均禁用（统一守卫），高亮文案统一 "更新可用：vX → vY" / "更新就绪：vX → vY"。
 
 **规则 R7（按钮区互斥）**：顶栏按钮在错误态也必须可用（日志、刷新、重启都是排查入口）——因此 Overlay 必须在内容区（Row 1），**不得覆盖顶栏**。
 

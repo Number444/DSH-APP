@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
@@ -13,6 +14,30 @@ namespace dsh_app;
 /// </summary>
 public partial class App : Application
 {
+    /// <summary>
+    /// 壳自身版本（读 Assembly InformationalVersion，SDK 自动生成自 csproj &lt;Version&gt;；
+    /// 去 + 后缀兜底——本地构建可能带 +sha）。供关于窗口、诊断面板、应用自更新共用。
+    /// </summary>
+    public static string AppVersion { get; } = ReadAppVersion();
+
+    private static string ReadAppVersion()
+    {
+        try
+        {
+            var v = typeof(App).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(v))
+            {
+                var plus = v.IndexOf('+');
+                return plus >= 0 ? v[..plus] : v;
+            }
+        }
+        catch
+        {
+            // 读取失败回退常量
+        }
+        return "1.3.0";
+    }
     /// <summary>
     /// 互斥体名：必须与历史版本（v1.1.0 及更早，Global\）一致——旧版只认互斥体不认进程扫描，
     /// 用 Local\ 会让旧版在修复版之后仍能启动（新旧并存回归，实测复现）。
@@ -39,6 +64,28 @@ public partial class App : Application
             "dsh-app");
         Directory.CreateDirectory(logDir);
         _logFilePath = Path.Combine(logDir, "app.log");
+
+        // 清理上次自更新残留的下载文件（*.part / *.new / *.sha256）。
+        // 不碰 backup/ 与 rolled-back.flag/updater.log——备份与回滚职责全归更新器脚本，
+        // 防"新实例清理删掉备份致回滚失效"竞态（架构评审项）。
+        try
+        {
+            var updateDir = Path.Combine(logDir, "update");
+            if (Directory.Exists(updateDir))
+            {
+                foreach (var pattern in new[] { "*.part", "*.new", "*.sha256" })
+                {
+                    foreach (var f in Directory.EnumerateFiles(updateDir, pattern))
+                    {
+                        try { File.Delete(f); } catch { /* 忽略单个失败 */ }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // 清理失败不影响启动
+        }
 
         // 单实例判定（v1.2.1 加固）：
         // ① 进程扫描是权威判断：任何存活的其他 dsh-app 进程（含互斥体已丢失的僵尸实例、
