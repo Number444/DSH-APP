@@ -66,7 +66,7 @@ public static class PopupAnimator
         // 淡入比总时长快（弹性档 240ms），保证"惯性滑出"发生时透明度已高、肉眼可见
         var fadeIn = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(Math.Min(240, options.DurationMs))))
         { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
-        // 缩放（质感档）：全程平滑展开（0.5→1.0，55% 与落位同步到位），不过冲——
+        // 缩放（质感档）：全程平滑展开（0.5→1.0，70% 与落位同步到位），不过冲——
         // "惯性"由位置承担（见 BuildGlide），缩放过冲观感是"猛地鼓一下"，位置惯性才是落位弹回
         AnimationTimeline growTx, growTy;
         if (options.Elastic)
@@ -80,16 +80,17 @@ public static class PopupAnimator
             growTx = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
             growTy = new DoubleAnimation(options.StartScale, 1, new Duration(dur)) { EasingFunction = ease };
         }
-        // 位置（质感档）：三段关键帧——抛物线落位（0-55%）→ 沿飞行方向惯性滑出 2px（55-72%）→ 平滑弹回（72-100%）。
-        // 惯性方向 = 飞行方向（-flyFrom 归一化）：顶栏继续向下 +2，托盘沿光标反方向 ±2；
+        // 位置（质感档）：惯性方向 = 飞行方向（-flyFrom 归一化，2px）：顶栏继续向下 +2，托盘沿光标反方向 ±2；
         // 幅度与 AnimSafePad 配套（抛出 24px + 惯性 2px = 26px < 40px 安全区）。
-        // 抛物线：水平先快后慢（抛出）+ 垂直先慢后快（下落，t² 自由落体），两轴合成弧线
+        // 主运动轴 Y：单条 BackEase 全程连续（冲过落点 2px 再平滑弹回），替代原三段关键帧拼接——
+        // 消除拼接点（70%）速度归零再重启的接缝顿挫；Amplitude 由过冲比 |inertia/from| 反解。
+        // X 轴保留三段关键帧（水平抛出先快后慢，与 Y 合成弧线）。
         var inertia = CalcInertia(new Point(translate.X, translate.Y));
         AnimationTimeline glideTx, glideTy;
         if (options.Elastic)
         {
             glideTx = BuildGlide(translate.X, inertia.X, new KeySpline(0.2, 0.0, 0.6, 1.0), dur);
-            glideTy = BuildGlide(translate.Y, inertia.Y, new KeySpline(0.5, 0.0, 1.0, 1.0), dur);
+            glideTy = BuildGlideBack(translate.Y, inertia.Y, dur);
         }
         else
         {
@@ -98,8 +99,8 @@ public static class PopupAnimator
             glideTy = new DoubleAnimation(translate.Y, 0, new Duration(dur))
             { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } };
         }
-        var clear = new DoubleAnimation(options.BlurRadius, 0, new Duration(TimeSpan.FromMilliseconds(options.BlurMs)))
-        { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        // 模糊渐清：匀速贯穿大部分动画（不设 EasingFunction = 默认线性，避免前段骤减），放大期间全程可见"模糊渐变"
+        var clear = new DoubleAnimation(options.BlurRadius, 0, new Duration(TimeSpan.FromMilliseconds(options.BlurMs)));
 
         // 先挂完成回调再开播；主动画（growTx，总时长最晚）完成时释放 Effect
         growTx.Completed += (_, _) =>
@@ -155,18 +156,22 @@ public static class PopupAnimator
             var dur = TimeSpan.FromMilliseconds(DefaultOpen.DurationMs);
             var inertia = CalcInertia(from);
 
-            // Scale：1.0（0-45%）→ StartScale（100%，fast 反转）；X/Y 各一个动画实例
+            // Scale：1.0（0-30%）→ StartScale（100%，fast 反转）；X/Y 各一个动画实例
             shrinkTx = BuildScaleReverse(dur);
             shrinkTy = BuildScaleReverse(dur);
-            // Translate：0 → inertia（0-28%，打开"弹回"的逆）→ 0（28-45%，打开"滑出"的逆）
-            //          → from（45-100%，抛物线原路飞回；flyRev = 打开飞行段 KeySpline 反转）
+            // Translate：X 轴保留三段关键帧反转（0 → inertia → 0 → from）；
+            // Y 轴（主运动轴）用 BackEase EaseIn 时间反转——开头向飞行方向顿 2px（打开"弹回"的逆）
+            // 再连续飞回锚点，与打开侧同样无拼接接缝
             glideTx = BuildGlideReverse(from.X, inertia.X, new KeySpline(0.4, 0.0, 0.8, 1.0), dur);
-            glideTy = BuildGlideReverse(from.Y, inertia.Y, new KeySpline(0.0, 0.0, 0.5, 1.0), dur);
-            // 模糊/淡出：BeginTime 延迟到后段（倒放时序；EaseIn = 打开 EaseOut 的时间反转）
+            glideTy = new DoubleAnimation(0, from.Y, new Duration(dur))
+            {
+                EasingFunction = new BackEase
+                { EasingMode = EasingMode.EaseIn, Amplitude = BackAmplitude(from.Y, inertia.Y) }
+            };
+            // 模糊/淡出：BeginTime 延迟到后段（倒放时序；模糊匀速 = 打开线性渐清的逆，EaseIn = 打开 EaseOut 反转）
             blurIn = new DoubleAnimation(0, DefaultOpen.BlurRadius,
                 new Duration(TimeSpan.FromMilliseconds(DefaultOpen.BlurMs)))
-            { BeginTime = TimeSpan.FromMilliseconds(DefaultOpen.DurationMs - DefaultOpen.BlurMs),
-              EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } };
+            { BeginTime = TimeSpan.FromMilliseconds(DefaultOpen.DurationMs - DefaultOpen.BlurMs) };
             fadeOut = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(240)))
             { BeginTime = TimeSpan.FromMilliseconds(240),
               EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn } };
@@ -213,56 +218,73 @@ public static class PopupAnimator
         public double DurationMs { get; set; } = 480;
         public double StartScale { get; set; } = 0.5;
         public double BlurRadius { get; set; } = 20;
-        public double BlurMs { get; set; } = 380;
+        public double BlurMs { get; set; } = 420;
         public bool Elastic { get; set; } = true;
         public bool Fly { get; set; } = true;
     }
 
-    /// <summary>缩放关键帧：start→1.0（55% 与落位同步到位），此后保持——全程平滑，无过冲（惯性由位置承担）。</summary>
+    /// <summary>缩放关键帧：start→1.0（70% 与落位同步到位），此后保持——全程平滑，无过冲（惯性由位置承担）。</summary>
     private static DoubleAnimationUsingKeyFrames BuildScale(OpenOptions options, Duration dur)
     {
         var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
         var fast = new KeySpline(0.2, 0.7, 0.3, 1.0);
         g.KeyFrames.Add(new SplineDoubleKeyFrame(options.StartScale, KeyTime.FromPercent(0.0), fast));
-        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.55), fast));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.70), fast));
         g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(1.0), fast));
         return g;
     }
 
-    /// <summary>位置三段关键帧：from→0（抛物线落位，0-55%）→ inertia（惯性滑出，55-72%）→ 0（平滑弹回）。
-    /// flySpline 控制抛物线手感：X 轴先快后慢（水平抛出），Y 轴先慢后快（t² 自由落体）。</summary>
+    /// <summary>位置三段关键帧：from→0（抛物线落位，0-70%）→ inertia（惯性滑出，70-82%）→ 0（平滑弹回）。
+    /// flySpline 控制抛物线手感：X 轴先快后慢（水平抛出）。</summary>
     private static DoubleAnimationUsingKeyFrames BuildGlide(double from, double inertia, KeySpline flySpline, Duration dur)
     {
         var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
         var back = new KeySpline(0.4, 0.0, 0.6, 1.0); // 弹回：先快后慢，轻落定
         g.KeyFrames.Add(new SplineDoubleKeyFrame(from, KeyTime.FromPercent(0.0), flySpline));
-        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.55), flySpline));
-        g.KeyFrames.Add(new SplineDoubleKeyFrame(inertia, KeyTime.FromPercent(0.72), new KeySpline(0.2, 0.0, 0.4, 1.0)));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.70), flySpline));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(inertia, KeyTime.FromPercent(0.82), new KeySpline(0.2, 0.0, 0.4, 1.0)));
         g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(1.0), back));
         return g;
     }
 
-    /// <summary>缩放关键帧（倒放）：1.0（0-45%）→ StartScale（100%），缓动 = 打开 fast 段的时间反转。</summary>
+    /// <summary>主运动轴（Y）位置动画：单条 BackEase EaseOut 全程连续——冲过落点（过冲 = 惯性 2px）
+    /// 再平滑回弹。替代三段关键帧拼接（拼接点速度归零再重启产生顿挫）；过冲方向自动沿飞行方向。</summary>
+    private static DoubleAnimation BuildGlideBack(double from, double inertia, Duration dur) =>
+        new(from, 0, dur)
+        {
+            EasingFunction = new BackEase
+            { EasingMode = EasingMode.EaseOut, Amplitude = BackAmplitude(from, inertia) }
+        };
+
+    /// <summary>BackEase 振幅反解：目标过冲 = |inertia|（2px），过冲比例 = |inertia/from|；
+    /// BackEase 过冲 ≈ Amplitude × 0.22（实测 0.3→5.1% / 0.4→8.9% / 0.5→13.1%），clamp 防极端行程。</summary>
+    private static double BackAmplitude(double from, double inertia)
+    {
+        double ratio = from != 0 ? Math.Abs(inertia / from) : 0.08;
+        return Math.Clamp(ratio / 0.22, 0.15, 0.6);
+    }
+
+    /// <summary>缩放关键帧（倒放）：1.0（0-30%）→ StartScale（100%），缓动 = 打开 fast 段的时间反转。</summary>
     private static DoubleAnimationUsingKeyFrames BuildScaleReverse(Duration dur)
     {
         var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
         var fastRev = new KeySpline(0.7, 0.0, 0.8, 0.3); // (0.2,0.7,0.3,1.0) 反转
         g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.0), fastRev));
-        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.45), fastRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(1.0, KeyTime.FromPercent(0.30), fastRev));
         g.KeyFrames.Add(new SplineDoubleKeyFrame(DefaultOpen.StartScale, KeyTime.FromPercent(1.0), fastRev));
         return g;
     }
 
-    /// <summary>位置关键帧（倒放）：0 → inertia（0-28%，打开"弹回"的逆）→ 0（28-45%，打开"滑出"的逆）
-    /// → from（45-100%，抛物线原路飞回锚点）。flyRev = 打开飞行段 KeySpline 的时间反转。</summary>
+    /// <summary>位置关键帧（倒放）：0 → inertia（0-18%，打开"弹回"的逆）→ 0（18-30%，打开"滑出"的逆）
+    /// → from（30-100%，抛物线原路飞回锚点）。flyRev = 打开飞行段 KeySpline 的时间反转。</summary>
     private static DoubleAnimationUsingKeyFrames BuildGlideReverse(double from, double inertia, KeySpline flyRev, Duration dur)
     {
         var g = new DoubleAnimationUsingKeyFrames { Duration = dur };
         var cRev = new KeySpline(0.4, 0.0, 0.6, 1.0); // 打开"弹回"段 (0.4,0,0.6,1) 自反
         var bRev = new KeySpline(0.6, 0.0, 0.8, 1.0); // 打开"滑出"段 (0.2,0,0.4,1) 反转
         g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.0), cRev));
-        g.KeyFrames.Add(new SplineDoubleKeyFrame(inertia, KeyTime.FromPercent(0.28), cRev));
-        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.45), bRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(inertia, KeyTime.FromPercent(0.18), cRev));
+        g.KeyFrames.Add(new SplineDoubleKeyFrame(0.0, KeyTime.FromPercent(0.30), bRev));
         g.KeyFrames.Add(new SplineDoubleKeyFrame(from, KeyTime.FromPercent(1.0), flyRev));
         return g;
     }
