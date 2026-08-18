@@ -694,10 +694,8 @@ public partial class MainWindow : Window
 
         TrayMenuPopup.HorizontalOffset = offsetX;
         TrayMenuPopup.VerticalOffset = offsetY;
-        // 抛出起点：菜单视觉位置在光标右/下方 → 从左/上方抛出（反向展开则反向），距离固定 14px
-        _trayFlyFrom = new Point(
-            offsetX + AppMenuPanel.AnimSafePad > x / scale ? -14 : 14,
-            offsetY + AppMenuPanel.AnimSafePad > y / scale ? -14 : 14);
+        // 抛出起点（直上直下，仅垂直分量）：菜单视觉位置在光标下方 → 从上方抛出，反向展开则从下方抛出，距离固定 14px
+        _trayFlyFrom = new Point(0, offsetY + AppMenuPanel.AnimSafePad > y / scale ? -14 : 14);
         TrayMenuPopup.IsOpen = true;
     }
 

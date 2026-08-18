@@ -69,7 +69,7 @@ public partial class AppMenuPanel : UserControl
         PopupAnimator.PlayOpen(RootCard, flyFrom);
     }
 
-    /// <summary>关闭动画（打开动画的严格倒放：沿抛物线原路飞回锚点 + 缩小 + 模糊 + 渐隐），完成后回调。</summary>
+    /// <summary>关闭动画（打开动画的严格倒放：沿垂直原路飞回锚点 + 缩小 + 模糊 + 渐隐），完成后回调。</summary>
     public void PlayCloseAnimation(Action? done = null) =>
         PopupAnimator.PlayClose(RootCard, done, null, _lastFlyFrom);
 }
