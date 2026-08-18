@@ -124,15 +124,14 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
 | 托盘化期间下载完成 | 气泡提示 + 待安装状态，不强制弹窗 |
 | 更新期间单实例 | 互斥体名/进程名不变，无冲突 |
 
-## 6. 发布侧（GitHub Release）
+## 6. 发布侧（GitHub Release，主人手动发布）
 
-独立脚本 `scripts/create-release.ps1`（发布第四步，push 之后运行；`release-publish.ps1` 保持发布+交付单一职责）：
+自动创建脚本（scripts/create-release.ps1）已删除（v1.3.1 起；gh CLI 登录不可用）。每次发版后由主人手动发布（艾薇提供材料），要点：
 
-1. 校验 `HEAD == origin/main`（禁止未推送 HEAD 打 tag）
-2. 生成 `dsh-app.exe.sha256`：**裸 64 位 hex**（`Get-FileHash` 输出 .Hash.ToLower()，无文件名——契约三处钉死：发布脚本 / `AppUpdater.Sha256Regex` / 本文档）
-3. gh CLI 检测（`gh --version` + `gh auth status`）；不可用 → 手动命令指引 exit 3
-4. tag 已存在 → 幂等跳过
-5. 确认框（创建公开 Release 是公开动作）→ `gh release create v<版本> dsh-app.exe dsh-app.exe.sha256 --repo Number444/DSH-APP --title ... --notes <docs/CHANGELOG.md 最新节>`
+1. 生成 `dsh-app.exe.sha256`：**裸 64 位 hex**（`Get-FileHash` 输出 .Hash.ToLower()，无文件名——契约两处钉死：`AppUpdater.Sha256Regex` / 本文档）
+2. tag 必须 `v<版本>`（壳侧正则 `^v\d+\.\d+\.\d+$` 校验）
+3. 两条资产缺一即"发布不完整"（壳侧 fail-closed 不误报）
+4. notes 取 `docs/CHANGELOG.md` 最新节；网页 Draft 或 `gh release create` 均可
 
 ## 7. 版本号
 
@@ -147,7 +146,7 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
   - 回滚路径：45s 验证失败 → exit 5、恢复旧版、rolled-back.flag
   - 等待超时：生产实例在跑 → 60s 放弃不覆盖（exit 2）
   - 覆盖失败：EPERM → 回滚（exit 4）
-- [ ] 端到端：发布 v1.3.0 → create-release → 检查链路（已是最新）→ 下一版发布时真实自更新验收
+- [ ] 端到端：发布 v1.3.0 → 手动 Release → 检查链路（已是最新）→ 下一版发布时真实自更新验收
 - [ ] 对抗：下载中断/断网、哈希篡改、磁盘不足、取消下载、托盘化期间下载、更新中关窗
 - [ ] 回归：Harness 更新/余额/托盘/单实例/主题/窗口记忆
 

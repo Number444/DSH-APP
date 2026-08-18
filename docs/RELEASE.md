@@ -1,8 +1,9 @@
 # dsh-app 发布流程（记忆文件）
 
-> 发布四步：**① commit → ② 一键发布脚本（release-publish.ps1）→ ③ push（由主人确定）→ ④ 创建 GitHub Release（create-release.ps1，可选但自更新依赖）**
+> 发布三步：**① commit → ② 一键发布脚本（release-publish.ps1）→ ③ push（由主人确定）**
 > 依据：README「构建与发布」、ARCHITECTURE「self-contained 单文件发布」决策、~/.dsh/skills/dsh-app.md 技能档案。
 > **铁律：第二步必须跑脚本，不得以"环境特殊/无实例/手动更可控"等现场判断为由改用裸命令**——除非主人明确指示（2026-08-14 教训：手动执行偏离规范，主人要求一律走脚本）。
+> GitHub Release 由**主人手动发布**（v1.3.0 起；gh CLI 登录不可用，自动创建流程已删除）——手动发布指引见文末附录。
 
 ---
 
@@ -51,20 +52,25 @@ git push origin main
 - push 命令**不带 HTTPS_PROXY 前缀**（全局红线）；若 git 配置的代理失效（Clash 挂起），用 `git -c http.proxy= -c https.proxy= push origin main` 直连（2026-08-14 实测：github 直连可达）
 - push 前可先 `git log --oneline -3` 确认要推的提交
 
-## 第四步：创建 GitHub Release（**应用自更新依赖**，push 之后运行）
+## 第四步：~~创建 GitHub Release~~（已删除，主人手动发布）
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\create-release.ps1
-```
+> v1.3.0 起 gh CLI 无法登录（浏览器拉起失败），自动创建流程（scripts/create-release.ps1）已删除。
+> 自更新仍依赖 Release（GitHub API `releases/latest`），每次发版后**由主人手动发布**，否则壳侧检查更新不可用。
 
-**脚本做什么**：
-1. 校验 `HEAD == origin/main`（不一致 → 先 push 再重跑，禁止在未推送 HEAD 上打 tag）
-2. 生成 `dsh-app.exe.sha256`（**裸 64 位 hex**，与壳侧 `AppUpdater.Sha256Regex` 契约一致）
-3. 检测 gh CLI 与登录态；不可用 → 输出手动命令指引（exit 3，不创建）
-4. tag 已存在 → 幂等跳过
-5. 确认框（创建公开 Release 是公开动作）→ `gh release create v<版本> dsh-app.exe dsh-app.exe.sha256 --repo Number444/DSH-APP --title "dsh-app v<版本>" --notes <docs/CHANGELOG.md 最新节>`
+### 手动发布指引（主人执行 / 艾薇提供材料）
 
-**说明**：自更新检查走 GitHub API `releases/latest`（公开仓库免 token）；发布不完整（缺 asset）时壳侧 fail-closed 不误报。Release 创建失败不阻塞已交付的窗口，但下次检查更新会不可用——发布后请补建。
+1. **生成 .sha256**（裸 64 位 hex，无文件名——契约两处钉死：`AppUpdater.Sha256Regex` / `docs/SELF-UPDATE.md`）：
+
+   ```powershell
+   $h = (Get-FileHash -Algorithm SHA256 "bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe").Hash.ToLower()
+   Set-Content -Encoding ascii -NoNewline -Path "bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe.sha256" -Value $h
+   ```
+
+2. **创建 Release**（tag 必须 `v<版本>`，正则 `^v\d+\.\d+\.\d+$`；两条资产缺一即"发布不完整"）：
+   - 网页 Draft：tag `v1.3.1` + 上传 `dsh-app.exe` 与 `dsh-app.exe.sha256` + notes 取 `docs/CHANGELOG.md` 最新节
+   - 或命令：`gh release create v<版本> <publish>\dsh-app.exe <publish>\dsh-app.exe.sha256 --repo Number444/DSH-APP --title "dsh-app v<版本>" --notes "<CHANGELOG 最新节>"`
+
+**说明**：发布不完整（缺 asset）时壳侧 fail-closed 不误报。Release 创建失败不阻塞已交付的窗口，但下次检查更新会不可用——发布后请补建。
 
 ## 部署到另一台电脑
 
