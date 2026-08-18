@@ -17,6 +17,13 @@ public sealed class HarnessUpdater : IDisposable
     private const int CheckTimeoutMs = 60_000;
     private const int UpdateTimeoutMs = 300_000;
 
+    // ---- 代理自适应：每次执行 npm 前实时探测 Clash 端口（TCP 直连探测，最可靠） ----
+    // 代理在线 → 显式走代理（行为同用户 npmrc）；代理离线 → --userconfig 空配置绕过死代理纯直连。
+    private const string ProxyHost = "127.0.0.1";
+    private const int ProxyPort = 7890;
+    private const string ProxyUrl = "http://127.0.0.1:7890";
+    private const int ProxyProbeTimeoutMs = 800;
+
     /// <summary>npm view 版本号输出校验正则（不匹配即视为检查失败，防止误报更新）。</summary>
     private static readonly Regex RegistryVersionRegex = new(
         @"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$",
@@ -78,7 +85,13 @@ public sealed class HarnessUpdater : IDisposable
             }
 
             WriteLog("检查 Harness 更新：npm view @deepseek-ai/dsh version…");
-            var result = await RunNpmAsync("view @deepseek-ai/dsh version", CheckTimeoutMs);
+            // fetch-retries=0：网络失败快速报错（默认重试会拖 ~70s 超过 60s 硬超时）；
+            // 隔离缓存目录：断网时 npm 会回退本地缓存"假成功"（拿陈数据报已是最新），
+            // 指向 %TEMP% 下专用空目录强制每次纯网络检查——失败必报错，绝不拿陈缓存交差
+            var cache = EnsureIsolatedCacheDir();
+            var checkArgs = "view @deepseek-ai/dsh version --fetch-retries=0"
+                + (cache is null ? "" : $" --cache \"{cache}\"");
+            var result = await RunNpmAsync(checkArgs, CheckTimeoutMs);
             if (!result.Launched)
             {
                 // 组件缺失/启动失败，原因已由 RunNpmAsync 记录
@@ -225,7 +238,7 @@ public sealed class HarnessUpdater : IDisposable
         var psi = new ProcessStartInfo
         {
             FileName = nodeExe,
-            Arguments = $"\"{npmCli}\" {arguments}",
+            Arguments = $"\"{npmCli}\" {arguments}{await BuildNetworkArgsAsync()}",
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
@@ -398,6 +411,75 @@ public sealed class HarnessUpdater : IDisposable
     {
         try { return proc.ExitCode; }
         catch { return -1; }
+    }
+
+    /// <summary>
+    /// 代理自适应：探测 Clash 端口，在线走代理、离线直连（--userconfig 空配置绕过用户 npmrc 里的死代理）。
+    /// 探测结果写日志透出。
+    /// </summary>
+    private async Task<string> BuildNetworkArgsAsync()
+    {
+        if (await ProbeProxyAsync())
+        {
+            WriteLog($"代理探测：{ProxyHost}:{ProxyPort} 可达，走代理");
+            return $" --proxy={ProxyUrl} --https-proxy={ProxyUrl}";
+        }
+        var rc = EnsureDirectNpmrc();
+        WriteLog(rc is null
+            ? $"代理探测：{ProxyHost}:{ProxyPort} 不可达，直连（空 npmrc 写入失败，仍受用户配置影响）"
+            : $"代理探测：{ProxyHost}:{ProxyPort} 不可达，直连 registry");
+        return rc is null ? "" : $" --userconfig \"{rc}\"";
+    }
+
+    /// <summary>TCP 探测代理端口（800ms 超时；不问系统设置、不读 npm 配置，直接问端口最可靠）。</summary>
+    private static async Task<bool> ProbeProxyAsync()
+    {
+        try
+        {
+            using var tcp = new System.Net.Sockets.TcpClient();
+            using var cts = new CancellationTokenSource(ProxyProbeTimeoutMs);
+            await tcp.ConnectAsync(ProxyHost, ProxyPort, cts.Token);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>直连模式用的空 npmrc（绕过用户配置中的代理设置；%TEMP% 下只写一次，失败返回 null）。</summary>
+    private static string? EnsureDirectNpmrc()
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), "dsh-app-direct.npmrc");
+            if (!File.Exists(path))
+                File.WriteAllText(path, "# dsh-app 直连模式空配置：绕过用户 npmrc 中的代理设置\n");
+            return path;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 检查更新专用隔离缓存目录（%TEMP% 下；**每次清空重建**——npm 断网会回退缓存"假成功"，
+    /// 只换目录不清空等于没隔离；清空后断网必失败，绝不拿陈缓存交差）。创建失败返回 null 退回默认缓存。
+    /// </summary>
+    private static string? EnsureIsolatedCacheDir()
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetTempPath(), "dsh-app-npmcache");
+            if (Directory.Exists(path)) Directory.Delete(path, true);
+            Directory.CreateDirectory(path);
+            return path;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>带时间戳写日志（与 ServerController.WriteLog 同格式）。</summary>
