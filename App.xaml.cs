@@ -34,9 +34,19 @@ public partial class App : Application
         }
         catch
         {
-            // 读取失败回退常量
+            // 读取失败走 AssemblyVersion 兜底
         }
-        return "1.3.0";
+        // 兜底读 AssemblyVersion（csproj Version 自动生成，永不漂移）；极端失败返回 0.0.0
+        try
+        {
+            var av = Assembly.GetExecutingAssembly().GetName().Version;
+            if (av is not null) return $"{av.Major}.{av.Minor}.{av.Build}";
+        }
+        catch
+        {
+            // 极端失败最后兜底
+        }
+        return "0.0.0";
     }
     /// <summary>
     /// 互斥体名：必须与历史版本（v1.1.0 及更早，Global\）一致——旧版只认互斥体不认进程扫描，
