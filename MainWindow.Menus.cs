@@ -28,6 +28,18 @@ public partial class MainWindow
 
     private void TitleBtnMenu_Click(object sender, RoutedEventArgs e) => MenuPopup.IsOpen = true;
 
+    /// <summary>
+    /// 窗口级 Esc 关闭菜单：焦点在主窗口（非 Popup 内）时兜底；焦点在 Popup 内时由面板自身
+    /// KeyDown → DismissRequested 处理（Popup 独立 HWND，本事件收不到）。两路均动画收拢。
+    /// </summary>
+    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        if (MenuPopup.IsOpen) { AnimateMenuClose(MenuPopup, TopMenu, true); e.Handled = true; }
+        else if (BalanceMenuPopup.IsOpen) { AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true); e.Handled = true; }
+        else if (TrayMenuPopup.IsOpen) { AnimateMenuClose(TrayMenuPopup, TrayMenu, true); e.Handled = true; }
+    }
+
     /// <summary>菜单关闭统一入口：animated=true 播关闭动画（打开动画的倒放，完成后置 IsOpen=false），
     /// false 瞬关（状态卡交接/隐藏退出路径）。倒放起点由 AppMenuPanel 内部记录（_lastFlyFrom）。</summary>
     private void AnimateMenuClose(Popup popup, AppMenuPanel panel, bool animated)
@@ -112,11 +124,14 @@ public partial class MainWindow
         dlg.ShowDialog();
         // 设置可能改了余额开关，关闭后同步启动/停止
         SyncBalanceFromSettings();
+        // 设置可能改了界面缩放
+        ApplyZoomFromSettings();
     }
 
     /// <summary>恢复并激活主窗口（托盘双击 / 托盘"打开主窗口"）。</summary>
     private void ShowMainWindow()
     {
+        TrySetWebViewSuspended(false); // 先唤醒页面渲染进程（托盘化挂起的逆操作），再显示窗口
         Show();
         if (WindowState == WindowState.Minimized)
             WindowState = WindowState.Normal;

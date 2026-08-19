@@ -38,6 +38,10 @@ public static class PopupAnimator
     private static readonly DependencyProperty IsClosingProperty = DependencyProperty.RegisterAttached(
         "IsClosing", typeof(bool), typeof(PopupAnimator), new PropertyMetadata(false));
 
+    /// <summary>逐帧模糊降级开关：渲染 Tier 2（完整硬件加速）以下禁用 BlurEffect 动画
+    /// （软渲染/远程桌面逐帧模糊是掉帧大户）；位移/缩放/淡入淡出不降级。</summary>
+    private static bool BlurSupported => RenderCapability.Tier >= 0x20000;
+
     /// <summary>
     /// 播放打开动画。flyFrom = 抛出起点相对最终位置的偏移（DIP）；**直上直下：仅取 Y 分量**（X 忽略），
     /// 菜单传 (0,-24)（从按钮上方抛出），托盘按展开方向 ±14；轻量档可传 null（无位移）。
@@ -57,8 +61,13 @@ public static class PopupAnimator
         el.RenderTransform = new TransformGroup { Children = { scale, translate } };
         el.RenderTransformOrigin = new Point(0.5, 0.5);
         el.Opacity = 0;
-        var blur = new BlurEffect { Radius = options.BlurRadius };
-        el.Effect = blur;
+        // 模糊（Tier 降级时不挂 Effect，Effect 属性留给调用方的静态阴影等用途）
+        BlurEffect? blur = null;
+        if (BlurSupported && options.BlurRadius > 0)
+        {
+            blur = new BlurEffect { Radius = options.BlurRadius };
+            el.Effect = blur;
+        }
 
         var dur = TimeSpan.FromMilliseconds(options.DurationMs);
         // 淡入比总时长快（弹性档 240ms），保证"惯性滑出"发生时透明度已高、肉眼可见
@@ -97,16 +106,19 @@ public static class PopupAnimator
         var clear = new DoubleAnimation(options.BlurRadius, 0, new Duration(TimeSpan.FromMilliseconds(options.BlurMs)));
 
         // 先挂完成回调再开播；主动画（growTx，总时长最晚）完成时释放 Effect
-        growTx.Completed += (_, _) =>
+        if (blur is not null)
         {
-            // 孤儿动画完成时不误清新动画的 Effect
-            if (ReferenceEquals(el.Effect, blur)) el.Effect = null;
-        };
+            growTx.Completed += (_, _) =>
+            {
+                // 孤儿动画完成时不误清新动画的 Effect
+                if (ReferenceEquals(el.Effect, blur)) el.Effect = null;
+            };
+        }
         el.BeginAnimation(UIElement.OpacityProperty, fadeIn);
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, growTx);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, growTy);
         translate.BeginAnimation(TranslateTransform.YProperty, glideTy);
-        blur.BeginAnimation(BlurEffect.RadiusProperty, clear);
+        blur?.BeginAnimation(BlurEffect.RadiusProperty, clear);
     }
 
     /// <summary>
@@ -137,8 +149,13 @@ public static class PopupAnimator
         el.RenderTransform = new TransformGroup { Children = { scale, translate } };
         el.RenderTransformOrigin = new Point(0.5, 0.5);
         el.Opacity = 1;
-        var blur = new BlurEffect { Radius = 0 };
-        el.Effect = blur;
+        // 模糊（Tier 降级时跳过：仅渐隐 + 缩小/位移）
+        BlurEffect? blur = null;
+        if (BlurSupported)
+        {
+            blur = new BlurEffect { Radius = 0 };
+            el.Effect = blur;
+        }
 
         AnimationTimeline shrinkTx, shrinkTy;
         AnimationTimeline? glideTy;
@@ -189,7 +206,7 @@ public static class PopupAnimator
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, shrinkTx);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrinkTy);
         if (glideTy != null) translate.BeginAnimation(TranslateTransform.YProperty, glideTy);
-        blur.BeginAnimation(BlurEffect.RadiusProperty, blurIn);
+        blur?.BeginAnimation(BlurEffect.RadiusProperty, blurIn);
     }
 
     /// <summary>恢复静止最终态：清动画时钟、清模糊、清变换、不透明。</summary>

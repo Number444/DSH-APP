@@ -2,15 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 using dsh_app.Helpers;
 
 namespace dsh_app.Views;
 
 /// <summary>
 /// 通用下拉菜单面板：渲染 AppMenuItem 列表（MenuItemButton 样式），点击经 ItemClicked 路由。
-/// 顶栏菜单 Popup 与托盘右键 ContextMenu 均基于同一视觉。
+/// 顶栏下拉、托盘右键、余额左键三处菜单共用（v1.2.1 起托盘同为 Popup，弃用 ContextMenu）。
 /// 代码生成按钮以支持每项独立 Foreground（高亮）与 IsEnabled（进行中置灰）。
 /// 打开/关闭动画委托 PopupAnimator（与余额状态卡等所有 Popup 复用同一套实现）。
+/// 键盘：打开后焦点落首项（↑↓ 由 WPF 方向导航天然支持，禁用项自动跳过），Esc 经 DismissRequested 上抛。
 /// </summary>
 public partial class AppMenuPanel : UserControl
 {
@@ -21,10 +24,38 @@ public partial class AppMenuPanel : UserControl
     public AppMenuPanel()
     {
         InitializeComponent();
+        // Popup 是独立 HWND，主窗口的 PreviewKeyDown 收不到面板内按键，Esc 必须就地捕获上抛
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                DismissRequested?.Invoke();
+                e.Handled = true;
+            }
+        };
     }
 
     /// <summary>菜单项被点击（参数为该项 Tag）。</summary>
     public event Action<string>? ItemClicked;
+
+    /// <summary>用户请求关闭菜单（Esc；由宿主动画关闭所属 Popup）。</summary>
+    public event Action? DismissRequested;
+
+    /// <summary>打开后将键盘焦点移入首个可用菜单项（Background 优先级：等 Popup 布局完成后执行）。</summary>
+    public void FocusFirstItem()
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            foreach (var child in ItemsHost.Children)
+            {
+                if (child is Button { IsEnabled: true } btn)
+                {
+                    btn.Focus();
+                    break;
+                }
+            }
+        });
+    }
 
     public static readonly DependencyProperty ItemsSourceProperty = DependencyProperty.Register(
         nameof(ItemsSource), typeof(IEnumerable<AppMenuItem>), typeof(AppMenuPanel),

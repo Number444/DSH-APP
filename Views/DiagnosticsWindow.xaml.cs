@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using dsh_app.Helpers;
@@ -51,6 +52,8 @@ public partial class DiagnosticsWindow : Window
         _themeHandler = _ => ApplyDwm();
         ThemeManager.ThemeChanged += _themeHandler;
         Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
+        // Esc 关窗（与"关闭"按钮等价，触发同一 Closed 清理）
+        KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
     }
 
     /// <summary>采集（并行四项 + 内存项）；字段先占位后填充，固定行高不抖动。</summary>

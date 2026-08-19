@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using dsh_app.Helpers;
 
@@ -44,6 +45,11 @@ public partial class SettingsWindow : Window
         ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
         ChkBalanceAlert.IsChecked = AppSettings.Current.BalanceAlertEnabled;
         ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
+        // 界面缩放回显（非法值按 100% 兜底）
+        var zoom = AppSettings.Current.ZoomPercent;
+        RadioZoom100.IsChecked = zoom == 100 || (zoom != 125 && zoom != 150);
+        RadioZoom125.IsChecked = zoom == 125;
+        RadioZoom150.IsChecked = zoom == 150;
         UpdateAlertUI();
         UpdateBalanceOptions();
         // 缓存清理已标记的状态回显
@@ -55,6 +61,8 @@ public partial class SettingsWindow : Window
         _themeHandler = _ => ApplyDwm();
         ThemeManager.ThemeChanged += _themeHandler;
         Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
+        // Esc 关窗（输入框失焦已保存，Esc 关闭不丢数据）
+        KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
     }
 
     private void OnThemeChanged(object sender, RoutedEventArgs e)
@@ -88,10 +96,23 @@ public partial class SettingsWindow : Window
     }
 
     // ---------------- 常驻（最小化到托盘） ----------------
-
     private void OnTrayCloseChanged(object sender, RoutedEventArgs e)
     {
         AppSettings.Current.MinimizeToTrayOnClose = ChkTrayClose.IsChecked == true;
+        AppSettings.Current.Save();
+    }
+
+    // ---------------- 显示（界面缩放） ----------------
+
+    /// <summary>缩放变更即保存（构造期回显赋值也会触发，写同值无副作用）；生效在设置窗关闭后由主窗口应用。</summary>
+    private void OnZoomChanged(object sender, RoutedEventArgs e)
+    {
+        if (RadioZoom125.IsChecked == true)
+            AppSettings.Current.ZoomPercent = 125;
+        else if (RadioZoom150.IsChecked == true)
+            AppSettings.Current.ZoomPercent = 150;
+        else
+            AppSettings.Current.ZoomPercent = 100;
         AppSettings.Current.Save();
     }
 

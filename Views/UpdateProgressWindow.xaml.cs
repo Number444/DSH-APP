@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using dsh_app.Helpers;
 
@@ -28,6 +29,8 @@ public partial class UpdateProgressWindow : Window
         _themeHandler = _ => ApplyDwm();
         ThemeManager.ThemeChanged += _themeHandler;
         Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
+        // Esc 关窗（检查在后台继续，完成时 HideCheckProgress 对已关窗口重复 Close 无副作用）
+        KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
     }
 
     protected override void OnSourceInitialized(EventArgs e)

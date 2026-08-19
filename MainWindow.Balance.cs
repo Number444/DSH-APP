@@ -58,8 +58,9 @@ public partial class MainWindow
 
     private void OnBalanceChanged(string? text)
     {
-        // 托盘悬停同步余额（窗口隐藏时也能看到）
-        TrayIcon.ToolTipText = text is null ? "DeepSeek Harness" : $"DeepSeek Harness — 余额 ¥{text}";
+        // 托盘悬停同步余额（窗口隐藏时也能看到；状态段由 UpdateTrayToolTip 组合）
+        _trayBalanceText = text;
+        UpdateTrayToolTip();
 
         if (text is null)
         {
@@ -132,6 +133,15 @@ public partial class MainWindow
         {
             AppendLog($"余额告警气泡失败: {ex.Message}");
         }
+    }
+
+    /// <summary>托盘悬停文案：标题 + 服务状态（启动中/运行中/已断开）+ 余额段（有值时）。</summary>
+    private void UpdateTrayToolTip()
+    {
+        var text = $"DeepSeek Harness · {_serviceStateText}";
+        if (_trayBalanceText is not null)
+            text += $" — 余额 ¥{_trayBalanceText}";
+        TrayIcon.ToolTipText = text;
     }
 
     /// <summary>右键余额交互已删除（v1.2.1）：左键菜单内含刷新/充值；此注释占位防误加回。</summary>

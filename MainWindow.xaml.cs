@@ -68,6 +68,10 @@ public partial class MainWindow : Window
     private bool _userRefreshPending;
     /// <summary>状态窗序号：防快速连续点击时旧延迟关闭误关新弹窗。</summary>
     private int _statusSeq;
+    /// <summary>托盘悬停文案的余额段（最近成功值；失败置 null 不残留旧值）。</summary>
+    private string? _trayBalanceText;
+    /// <summary>托盘悬停文案的服务状态段（启动中 / 运行中 / 已断开）。</summary>
+    private string _serviceStateText = "启动中";
 
     // ---- 菜单"点击外部关闭"（低级鼠标钩子） ----
     // WebView2 是原生 HWND：点击页面区域不进入 WPF 输入路由，Popup 的 StaysOpen=False
@@ -120,13 +124,20 @@ public partial class MainWindow : Window
         // 托盘菜单：与 APP 内菜单同一公共控件（Popup 定位，弃用 ContextMenu）；内容由 UpdateMenuItems 联动
         TrayMenu.ItemClicked += OnTopMenuClicked;
 
+        // 菜单键盘可达：焦点在 Popup 内时 Esc 经面板 DismissRequested 关闭（Popup 独立 HWND，
+        // 窗口级 PreviewKeyDown 收不到）；焦点在主窗口时走 OnWindowPreviewKeyDown 兜底
+        TopMenu.DismissRequested += () => AnimateMenuClose(MenuPopup, TopMenu, true);
+        BalanceMenu.DismissRequested += () => AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true);
+        TrayMenu.DismissRequested += () => AnimateMenuClose(TrayMenuPopup, TrayMenu, true);
+        PreviewKeyDown += OnWindowPreviewKeyDown;
+
         // 菜单"点击外部关闭"：三个 Popup 全部接入（打开时装钩子，关闭时自动卸载）
         // 打开动画经 Opened 统一驱动：顶栏/余额从按钮上方抛出（(0,-24)），托盘按光标方向
-        MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -24)); };
+        MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -24)); TopMenu.FocusFirstItem(); };
         MenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); BalanceMenu.PlayOpenAnimation(new Point(0, -24)); };
+        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); BalanceMenu.PlayOpenAnimation(new Point(0, -24)); BalanceMenu.FocusFirstItem(); };
         BalanceMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        TrayMenuPopup.Opened += (_, _) => { InstallDismissHook(); TrayMenu.PlayOpenAnimation(_trayFlyFrom); };
+        TrayMenuPopup.Opened += (_, _) => { InstallDismissHook(); TrayMenu.PlayOpenAnimation(_trayFlyFrom); TrayMenu.FocusFirstItem(); };
         TrayMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
         // 余额状态卡：轻量档打开动画（淡入 + 轻放大，无位移无弹性）
         BalanceStatusPopup.Opened += (_, _) =>
@@ -234,11 +245,72 @@ public partial class MainWindow : Window
         wv.Settings.IsStatusBarEnabled = false;
         // 深色偏好传递给页面：滚动条/表单控件走深色（仅偏好提示，不改页面内容）
         wv.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
+        // 页面 target=_blank 外链：壳内无多窗口概念，接管抛系统浏览器
+        wv.NewWindowRequested += OnNewWindowRequested;
 
         wv.NavigationCompleted += OnNavigationCompleted;
         wv.ProcessFailed += OnProcessFailed;
 
+        ApplyZoomFromSettings();
+
         AppendLog("WebView2 就绪");
+    }
+
+    /// <summary>页面新开窗口请求（target=_blank 等）：一律抛系统浏览器，仅放行 http/https。</summary>
+    private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+    {
+        e.Handled = true;
+        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(e.Uri) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开外链失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>应用设置中的界面缩放（100/125/150% → ZoomFactor；初始化与设置窗关闭后各调一次）。</summary>
+    private void ApplyZoomFromSettings()
+    {
+        try
+        {
+            WebView.ZoomFactor = Math.Clamp(AppSettings.Current.ZoomPercent, 50, 300) / 100.0;
+        }
+        catch
+        {
+            // WebView 未就绪等瞬时态：忽略，下次设置窗口关闭时再应用
+        }
+    }
+
+    /// <summary>
+    /// 托盘化页面挂起：窗口隐藏到托盘时挂起渲染进程（省电省 CPU），恢复窗口时唤醒。
+    /// 页面活动（音频等）可能拒绝挂起——尽力而为，失败仅记日志；真退出路径无需 Resume（进程即毁）。
+    /// </summary>
+    private async void TrySetWebViewSuspended(bool suspend)
+    {
+        try
+        {
+            var wv = WebView.CoreWebView2;
+            if (wv is null) return;
+            if (suspend)
+            {
+                if (wv.IsSuspended) return;
+                if (!await wv.TrySuspendAsync())
+                    AppendLog("页面挂起被页面活动拒绝（忽略，继续运行）");
+            }
+            else if (wv.IsSuspended)
+            {
+                wv.Resume();
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"页面挂起/恢复异常: {ex.Message}");
+        }
     }
 
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -250,6 +322,8 @@ public partial class MainWindow : Window
             // 页面已渲染完成：显示 WebView2 再收起覆盖层，避免黑屏空窗
             WebView.Visibility = Visibility.Visible;
             HideOverlay();
+            _serviceStateText = "运行中";
+            UpdateTrayToolTip();
             _rendererReloadTried = false;
             StartHeartbeatIfAdopted();
             StartBalanceIfEnabled();
@@ -258,10 +332,26 @@ public partial class MainWindow : Window
         else
         {
             AppendLog($"页面加载失败: {e.WebErrorStatus}");
-            UpdateStep(ServerStep.Load, StepStatus.Failed, $"WebView2 连接失败（{e.WebErrorStatus}）");
-            ShowError("页面加载失败", $"WebView2 无法连接服务器（{e.WebErrorStatus}）。\n服务器可能已停止。", allowRetry: true);
+            var errText = WebErrorText(e.WebErrorStatus);
+            UpdateStep(ServerStep.Load, StepStatus.Failed, errText);
+            ShowError("页面加载失败", $"WebView2 {errText}。\n服务器可能已停止。", allowRetry: true);
         }
     }
+
+    /// <summary>WebView2 导航错误码 → 中文短语（错误卡/步骤行不直显英文枚举）。</summary>
+    private static string WebErrorText(CoreWebView2WebErrorStatus status) => status switch
+    {
+        CoreWebView2WebErrorStatus.CannotConnect => "无法连接服务（可能未启动）",
+        CoreWebView2WebErrorStatus.ConnectionAborted => "连接被中断",
+        CoreWebView2WebErrorStatus.ConnectionReset => "连接被重置",
+        CoreWebView2WebErrorStatus.HostNameNotResolved => "地址解析失败",
+        CoreWebView2WebErrorStatus.OperationCanceled => "操作已取消",
+        CoreWebView2WebErrorStatus.Timeout => "连接超时",
+        CoreWebView2WebErrorStatus.CertificateIsInvalid => "证书校验失败",
+        CoreWebView2WebErrorStatus.Disconnected or CoreWebView2WebErrorStatus.ServerUnreachable
+            => "服务不可达（可能已停止）",
+        _ => $"网络错误（{status}）",
+    };
 
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
     {
@@ -342,6 +432,8 @@ public partial class MainWindow : Window
     {
         _heartbeat.Stop();
         WebView.Visibility = Visibility.Collapsed;
+        _serviceStateText = "已断开";
+        UpdateTrayToolTip();
         ShowError("服务连接已断开", detail + "\n点「重试」重新拉起服务。", allowRetry: true);
     }
 
@@ -363,6 +455,8 @@ public partial class MainWindow : Window
     private void ShowLoading()
     {
         _heartbeat.Stop(); // 启动/重试期间不做死亡判定
+        _serviceStateText = "启动中";
+        UpdateTrayToolTip();
         ResetSteps();
         FadeInOverlay();
         CenterBrand.Visibility = Visibility.Visible;
@@ -668,6 +762,7 @@ public partial class MainWindow : Window
             e.Cancel = true;
             CloseAllMenus(); // Popup 是独立 HWND：不关则残留屏幕，钩子也保持常驻
             Hide();
+            TrySetWebViewSuspended(true); // 挂起渲染进程，托盘驻留不空转（页面活动可拒绝，尽力而为）
             if (!_trayHintShown)
             {
                 _trayHintShown = true;

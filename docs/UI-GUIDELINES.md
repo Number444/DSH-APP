@@ -1,7 +1,7 @@
 # dsh-app 窗口架构与 UI 规范
 
 > 统一窗口架构与视觉规范的权威文件。所有对 MainWindow 的改动必须先读这里。
-> 更新时间：2026-08-19
+> 更新时间：2026-08-19（v1.4.0 后未发布轮：键盘可达性 / 焦点框 / 外链与挂起 / 阴影分层 / 动画降级）
 
 ---
 
@@ -48,7 +48,7 @@
 
 **工具按钮固定清单（4 个，勿删减，纯文字）**：刷新 / 浏览器 / 重启服务 / 菜单（下拉：关于、设置、日志、诊断信息、检查 Harness 更新、检查应用更新）。日志入口在菜单内（2026-08-14 自顶栏移入）。
 
-**下拉菜单公共控件**（v1.2.0）：菜单项渲染统一走 `Views/AppMenuPanel`（卡片容器 + `MenuItemButton` 项，点击经 `ItemClicked(Tag)` 路由）；**顶栏下拉、托盘右键、余额左键三处菜单全部同源**（均为 Popup + AppMenuPanel；v1.2.1 起托盘弃用 ContextMenu——系统 ContextMenu 的弹出动画/阴影/触发与 APP 内 Popup 菜单差异明显）。菜单项数据模型 `AppMenuItem(Tag, Content, Foreground?, Enabled?)`，高亮（更新可用蓝色）与禁用（检查/更新中）由 `MainWindow.UpdateMenuItems()` 重建列表驱动（托盘项经 `UpdateTrayMenuItems` 联动）。余额菜单（左键弹出）：刷新余额 / 打开充值页，刷新结果经余额按钮下方状态卡反馈；点击外部自动关闭（WH_MOUSE_LL 钩子，见 MainWindow 实现）。**两个更新入口**（v1.3.0）："检查 Harness 更新"（npm 包）与"检查应用更新"（壳自身，GitHub Releases）状态机完全拆分，任一检查/更新进行中两个入口均禁用（统一守卫），高亮文案统一 "更新可用：vX → vY" / "更新就绪：vX → vY"。
+**下拉菜单公共控件**（v1.2.0）：菜单项渲染统一走 `Views/AppMenuPanel`（卡片容器 + `MenuItemButton` 项，点击经 `ItemClicked(Tag)` 路由）；**顶栏下拉、托盘右键、余额左键三处菜单全部同源**（均为 Popup + AppMenuPanel；v1.2.1 起托盘弃用 ContextMenu——系统 ContextMenu 的弹出动画/阴影/触发与 APP 内 Popup 菜单差异明显）。菜单项数据模型 `AppMenuItem(Tag, Content, Foreground?, Enabled?)`，高亮（更新可用蓝色）与禁用（检查/更新中）由 `MainWindow.UpdateMenuItems()` 重建列表驱动（托盘项经 `UpdateTrayMenuItems` 联动）。余额菜单（左键弹出）：刷新余额 / 打开充值页，刷新结果经余额按钮下方状态卡反馈；点击外部自动关闭（WH_MOUSE_LL 钩子，见 MainWindow 实现）。**键盘可达**：打开后焦点自动落首个可用项（`FocusFirstItem`，Background 优先级），↑↓ 走 WPF 方向导航（禁用项自动跳过）；Esc 关闭为双路——焦点在 Popup 内由面板 `KeyDown → DismissRequested` 上抛（Popup 独立 HWND，主窗口事件收不到），焦点在主窗口由窗口级 `PreviewKeyDown` 兜底，两路均动画收拢。**两个更新入口**（v1.3.0）："检查 Harness 更新"（npm 包）与"检查应用更新"（壳自身，GitHub Releases）状态机完全拆分，任一检查/更新进行中两个入口均禁用（统一守卫），高亮文案统一 "更新可用：vX → vY" / "更新就绪：vX → vY"。
 
 **规则 R7（按钮区互斥）**：顶栏按钮在错误态也必须可用（日志、刷新、重启都是排查入口）——因此 Overlay 必须在内容区（Row 1），**不得覆盖顶栏**。
 
@@ -174,6 +174,15 @@
 - **`Profile.PreferredColorScheme = Dark`**：页面滚动条/表单控件走深色（仅偏好提示，不改页面内容）。
 - 覆盖层显示/隐藏统一走 150ms Opacity 淡入淡出（`FadeInOverlay` / `HideOverlay`）；淡出是动画完成后才 `Collapsed`，期间不可交互。
 - 窗口位置/尺寸/最大化状态由 `WindowPlacementStore` 记忆（`window.json`）；最大化按钮图标随 `StateChanged` 在 `□` / `❐` 间切换。
+- **页面外链（target=_blank）接管**：`NewWindowRequested` → `Handled=true` + 抛系统浏览器（仅 http/https），壳内不开第二窗口。
+- **界面缩放**：设置页 100/125/150% 三段（`AppSettings.ZoomPercent`）→ `WebView.ZoomFactor`；初始化后与设置窗关闭后各应用一次。
+- **托盘化渲染挂起**：`Hide()` 到托盘后 `TrySuspendAsync()` 挂起渲染进程（页面活动可拒绝，尽力而为只记日志），`ShowMainWindow()` 先 `Resume()` 再显示。
+- **导航错误文案中文化**：`WebErrorText(status)` 统一映射，错误卡/步骤行不直显英文枚举。
+
+### 4.6 键盘可达性与焦点
+
+- **Esc 关窗统一**：关于/设置/诊断/更新进度窗构造期 `KeyDown += Escape → Close()`；`ConfirmDialog` 走 `IsCancel`。
+- **焦点框统一 `FocusRingStyle`**（Theme.xaml）：1px 弱蓝描边（Opacity 0.55，装饰层渲染不影响布局）；按钮/开关/胶囊样式一律引用，**禁止再 `FocusVisualStyle="{x:Null}"`**。
 
 ---
 
@@ -191,7 +200,7 @@
 | 重试 / 顶栏重启服务 | **先 `WebView.Visibility = Collapsed`（R1：覆盖层盖不住 HWND）** → `ShowLoading()`（重置步骤）→ `Shutdown()` → 重新 `EnsureServerAsync()` → `Navigate` |
 | 顶栏刷新 | `CoreWebView2.Reload()`（页面卡死时用） |
 | 顶栏浏览器打开 | `Process.Start(url, UseShellExecute=true)`——用户原有的浏览器工作流后路 |
-| 关窗（默认） | **最小化到托盘**：`OnClosing` 中 `e.Cancel + Hide()`（服务继续运行）；首次隐藏弹托盘气泡提示；设置 `MinimizeToTrayOnClose=false` 恢复关窗即退 |
+| 关窗（默认） | **最小化到托盘**：`OnClosing` 中 `e.Cancel + Hide()`（服务继续运行，页面渲染挂起——见 §4.5）；首次隐藏弹托盘气泡提示；设置 `MinimizeToTrayOnClose=false` 恢复关窗即退 |
 | 托盘退出 | 托盘菜单"退出"置 `_trayExitRequested=true` 再 `Close()` 放行；更新中断确认（`_abortUpdateConfirmed`）同样放行——两者都必须排除在托盘拦截之外 |
 | 托盘化后清理 | `ServerController.Shutdown()`：清理**自己拉起的**进程；**接管的外部服务经身份验证（进程命令行含 dsh/bin.js 特征）确认是 dsh 后一并停止**（防"关不掉"残留），非 dsh 程序绝不误杀 |
 
@@ -205,3 +214,6 @@
 4. 后台事件 → UI 一律 `DispatchUi`（BeginInvoke 异步派发，R4），禁止直接触碰控件。
 5. 日志双通道：`AppendLog`（UI 展示 + app.log 落盘）由 `_server.Log` 驱动，新增诊断信息走同一通道。
 6. 新增 UI 区域必须先过本规范：**R1（airspace）→ R2（主次）→ R3（首帧反馈）→ R4（线程）→ R5（对齐）**。
+7. **Effect 分层铁律**：`UIElement.Effect` 同一元素只能挂一个——`PopupAnimator` 的动画模糊挂在动画承载元素上（AppMenuPanel.RootCard / 状态卡外层包裹 Border），静态阴影（DropShadowEffect）必须挂内层卡片，二者不得同层。
+8. **动画渲染降级**：`PopupAnimator` 在渲染 Tier < 2（软渲染/远程桌面）时自动跳过逐帧模糊，位移/缩放/淡入淡出保留；新增重效果动画须同样过 `BlurSupported` 判定。
+9. **设置窗高度上限**：内容包 `ScrollViewer MaxHeight=620` + `CustomScrollBar`（§6.2 同款双列 Grid），设置项增长不得突破该结构。

@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-19 · 版本 v1.4.0 · 本次更新:MainWindow 拆分 partial（六文件）、事件派发异步化（DispatchUi）、日志截断轮转、WebView2 缓存清理（标记 + 下次启动清）、应用更新提示带 changelog、Runtime 缺失引导卡、双更新检查并行
+> 更新时间:2026-08-19 · 版本 v1.4.0+未发布 · 本次更新:外链抛系统浏览器（NewWindowRequested）、托盘化挂起页面渲染（TrySuspendAsync）、各窗统一 Esc 关闭、菜单键盘可达（Esc/↑↓/焦点入 Popup）、共享焦点框（FocusRingStyle）、设置窗 620px 滚动上限、关于窗品牌图标内嵌化、动画按渲染 Tier 降级、导航错误文案中文化（WebErrorText）、界面缩放设置（ZoomFactor）、托盘悬停带服务状态、菜单/状态卡轻阴影（阴影与动画模糊分层）
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -57,9 +57,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听；`ButtonBlueBrush`（主操作按钮，对比度达标） |
 | 安全层 | `Helpers/DpapiHelper.cs` | DPAPI 加解密（CurrentUser），密钥类字段存储 |
 | 控件层 | `Helpers/CustomScrollBar.cs` | 自定义迷你滚动条(四档过渡,自 Toolbox 移植) |
-| 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` / `Views/ConfirmDialog` | 设置（主题/更新/常驻/**数据目录与缓存清理**/余额）、关于、通用自绘弹窗（单/双按钮 + glyph + 破坏性红色模式 + **长文本 320px 滚动区**） |
+| 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` / `Views/ConfirmDialog` | 设置（主题/更新/常驻/**界面缩放**/数据目录与缓存清理/余额，超高 620px 滚动兜底）、关于（品牌图标内嵌 PNG）、通用自绘弹窗（单/双按钮 + glyph + 破坏性红色模式 + 长文本 320px 滚动区）；**各窗统一 Esc 关闭** |
 | 维护层 | `Helpers/WebView2CacheCleaner.cs` | WebView2 页面缓存清理：设置页写 `clear-cache.flag` 标记，下次启动在 WebView2 初始化前清 Cache/Code Cache/GPUCache（不动 Cookies/Local Storage，登录态保留） |
-| 资源层 | `Resources/Theme.xaml` | 按钮/滚动条等公用样式(全部 DynamicResource) |
+| 资源层 | `Resources/Theme.xaml` | 按钮/滚动条等公用样式(全部 DynamicResource)、**`FocusRingStyle` 共享焦点框**（键盘焦点可见） |
 | 清单层 | `app.manifest` | PerMonitorV2 DPI 感知（混合 DPI 多屏修复） |
 | 被托管层 | dsh web(node 进程) | Harness UI + API,与本项目完全解耦 |
 
@@ -128,7 +128,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 服务器中途停止(接管的外部 dsh) | 页面就绪后 30s 心跳 `CheckAliveAsync`,连续 2 次失败 → 同上错误卡;重试/重启/关窗时停止心跳 |
 | 渲染进程崩溃 | `ProcessFailed(RenderProcessExited/Unresponsive)` → 自动 `Reload()` 一次,再崩溃 → 错误卡 + 重试 |
 | 页面进程退出 | WebView2 `ProcessFailed(BrowserProcessExited)` → 覆盖层"页面进程已退出" + 重试 |
-| 导航失败 | `NavigationCompleted(!IsSuccess)` → 错误卡片 + 重试(重试先 Shutdown 再重新 Ensure) |
+| 导航失败 | `NavigationCompleted(!IsSuccess)` → 错误卡片 + 重试(重试先 Shutdown 再重新 Ensure)；错误码经 `WebErrorText` 中文化 |
+| 页面外链（target=_blank） | `NewWindowRequested` 接管：Handled=true，仅 http/https 抛系统浏览器，壳内不开第二窗口 |
+| 最小化到托盘 | `Hide()` 后 `TrySuspendAsync` 挂起渲染进程（页面活动可拒绝，尽力而为）；恢复窗口 `Resume()`；真退出无需唤醒 |
 | 更新中关窗 | `OnClosing` 拦截 + ConfirmDialog"中断并关闭/继续更新"；确认后 `AbortRunningNpm` 终止安装并关闭（半安装比跑完更危险）；`Dispose` 不杀进程 |
 | 更新失败 | 先 `EnsureServerAsync()` 恢复旧服务 → 错误卡 + `LastError` 原因 + 手动安装指引 |
 | 应用自更新下载中关窗 | 托盘化（Hide）不取消下载（后台继续，完成弹气泡 + 待安装，恢复窗口确认）；真退出（托盘"退出"/关窗直退）取消下载并清理；`_quitForAppUpdate` 放行更新重启的真退出 |
@@ -159,6 +161,8 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 17. **日志截断轮转**——`FileLog.TrimIfOversize`：单实例判定之后、首次写入之前执行（避开 FlushLoop 竞争，也避免第二实例截断第一实例的活跃日志）；超 2MB 留尾 500KB，字节级找 `\n` 丢残行（UTF-8 安全），保留 BOM
 18. **缓存清理标记化**——运行中 WebView2 缓存目录被 Runtime 锁定，设置页按钮只写 `clear-cache.flag`；下次启动在 `InitWebViewAsync` 之前清 Cache/Code Cache/GPUCache（按目录名递归匹配、先快照再删），不动 Cookies/Local Storage
 19. **MainWindow 拆分 partial**——2001 行单文件拆为 6 个 partial（纯移动零逻辑变更），职责：主体（启动/覆盖层/心跳/生命周期）+ Tray / Menus / Updates / Balance / Native
+20. **托盘化渲染挂起**——隐藏到托盘后 `CoreWebView2.TrySuspendAsync()` 挂起渲染进程（页面活动可拒绝，尽力而为只记日志），恢复窗口 `Resume()`；长期驻留不空转，省电省 CPU
+21. **键盘可达性成套**——各窗统一 Esc 关闭；菜单打开焦点入 Popup 首项（↑↓ 方向导航天然支持、禁用项自动跳过，Esc 双路：面板 KeyDown→DismissRequested + 窗口 PreviewKeyDown 兜底）；共享 `FocusRingStyle` 焦点框替换全量 `{x:Null}`
 
 ## 6. 可移植性设计
 
@@ -175,7 +179,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 - 缓存清理标记:`%LOCALAPPDATA%\dsh-app\clear-cache.flag`(设置页写入,下次启动清理后删除)
 - WebView2 用户数据:`%LOCALAPPDATA%\dsh-app\WebView2\`（与 Edge 隔离；缓存清理只动其中的 Cache/Code Cache/GPUCache）
 - 窗口位置/尺寸/最大化状态:`%LOCALAPPDATA%\dsh-app\window.json`(还原前校验与虚拟屏有交集,防外接屏拔除后窗口不可见)
-- 设置:`%LOCALAPPDATA%\dsh-app\settings.json`(主题/自动检查更新/自动检查应用更新/余额开关/凭据读取授权标记/手动 Key 的 DPAPI 密文,原子写入)
+- 设置:`%LOCALAPPDATA%\dsh-app\settings.json`(主题/自动检查更新/自动检查应用更新/界面缩放/余额开关/凭据读取授权标记/手动 Key 的 DPAPI 密文,原子写入)
 
 ## 8. 排除的备选方案(决策记录)
 

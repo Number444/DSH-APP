@@ -4,15 +4,27 @@
     <!-- 通用下拉菜单卡片容器：顶栏菜单与托盘右键菜单共用。
          视觉 = 卡片背景 + 圆角 + MenuItemButton 项列表；点击经 ItemClicked 路由出去。
          Margin 留白 = 动画安全区（AnimSafePad=40）：抛出位移/弹性过冲超出 Popup HWND
-         的部分会被 HWND 边界裁切，必须留出余量；留白透明不可见，不影响视觉。 -->
+         的部分会被 HWND 边界裁切，必须留出余量；留白透明不可见，不影响视觉。
+         分层：RootCard = 动画承载（PopupAnimator 的 BlurEffect 挂它身上）；
+         中层 = 静态阴影（Effect 同一元素只能挂一个，阴影与动画模糊必须分层）；
+         最内层 = 视觉卡片（背景/描边/圆角）。 -->
     <Border x:Name="RootCard"
             Margin="40"
-            MinWidth="220"
-            Padding="4"
-            Background="{DynamicResource BgCardBrush}"
-            BorderBrush="{DynamicResource BorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8">
-        <StackPanel x:Name="ItemsHost" />
+            MinWidth="220">
+        <Border CornerRadius="8">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="18"
+                                  ShadowDepth="2"
+                                  Opacity="0.3"
+                                  Color="Black" />
+            </Border.Effect>
+            <Border Padding="4"
+                    Background="{DynamicResource BgCardBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <StackPanel x:Name="ItemsHost" />
+            </Border>
+        </Border>
     </Border>
 </UserControl>

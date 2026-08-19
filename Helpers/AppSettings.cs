@@ -43,6 +43,9 @@ public sealed class AppSettings
     /// <summary>允许读取 ~/.dsh/.credentials.yaml（用户确认弹窗授权后置真，可撤销）。</summary>
     public bool AllowReadDshCredentials { get; set; }
 
+    /// <summary>界面缩放百分比（100 / 125 / 150；映射 WebView2 ZoomFactor，默认 100）。</summary>
+    public int ZoomPercent { get; set; } = 100;
+
     /// <summary>手动兜底模式的 API Key（DPAPI 密文 Base64，绝不明文落盘）。</summary>
     public string? EncryptedApiKey { get; set; }
 

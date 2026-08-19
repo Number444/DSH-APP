@@ -92,21 +92,31 @@
                 </Button>
             </StackPanel>
 
-            <!-- 余额刷新状态卡（锚定余额按钮下方；Popup 独立 HWND，不受 airspace 影响） -->
+            <!-- 余额刷新状态卡（锚定余额按钮下方；Popup 独立 HWND，不受 airspace 影响）。
+                 外层 Border 为动画承载（PopupAnimator 挂 BlurEffect），内层卡片挂静态阴影——
+                 Effect 同一元素只能挂一个，阴影与动画模糊必须分层 -->
             <Popup x:Name="BalanceStatusPopup"
                    Placement="Bottom"
                    PlacementTarget="{Binding ElementName=TitleBalance}"
                    AllowsTransparency="True"
                    StaysOpen="False"
                    IsOpen="False">
-                <Border Padding="12,8"
-                        Background="{DynamicResource BgCardBrush}"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="8">
-                    <TextBlock x:Name="BalanceStatusText"
-                               FontSize="12"
-                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                <Border>
+                    <Border Padding="12,8"
+                            Background="{DynamicResource BgCardBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="14"
+                                              ShadowDepth="2"
+                                              Opacity="0.3"
+                                              Color="Black" />
+                        </Border.Effect>
+                        <TextBlock x:Name="BalanceStatusText"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </Border>
                 </Border>
             </Popup>
 

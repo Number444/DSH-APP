@@ -10,10 +10,11 @@
         ShowInTaskbar="False">
     <StackPanel Margin="28,24,28,24">
         <StackPanel Orientation="Horizontal">
-            <TextBlock Text="◈"
-                       FontSize="30"
-                       Foreground="{DynamicResource AccentBlueBrush}"
-                       VerticalAlignment="Center" />
+            <!-- 内嵌 PNG 图标（替代 ◈ 字符字形，消除字体回退显示不一致风险） -->
+            <Image Source="/Assets/icon256.png"
+                   Width="40"
+                   Height="40"
+                   VerticalAlignment="Center" />
             <StackPanel Margin="14,0,0,0">
                 <TextBlock Text="DeepSeek Harness 桌面壳"
                            FontSize="18"

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
 using dsh_app.Helpers;
 
@@ -22,6 +23,8 @@ public partial class AboutWindow : Window
         _themeHandler = _ => ApplyDwm();
         ThemeManager.ThemeChanged += _themeHandler;
         Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
+        // Esc 关窗（与确认弹窗等全局一致）
+        KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
