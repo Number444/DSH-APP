@@ -233,7 +233,7 @@ public partial class App : Application
             // 给出提示而非静默闪退，用户才能知道发生了什么
             try
             {
-                MessageBox.Show("dsh-app 已在运行，但未找到可激活的窗口。\n请从托盘图标或任务管理器结束现有实例后重试。",
+                MessageBox.Show("dsh-app 已在运行，但找不到它的窗口。\n请从托盘图标或任务管理器结束该实例后重试。",
                     "DeepSeek Harness", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             catch { /* 忽略 */ }

@@ -66,7 +66,7 @@ public partial class MainWindow
                 var dlg = new Views.ConfirmDialog("发现 Harness 新版本",
                     $"当前版本：v{_updater.LocalVersion ?? "未知"}\n" +
                     $"最新版本：v{_updater.LatestVersion}\n\n" +
-                    "更新期间服务会中断，页面将重新加载（约 1 分钟）。是否继续？",
+                    "更新期间服务会中断，页面重新加载（约 1 分钟）。是否继续？",
                     "更新", "暂不") { Owner = this };
                 if (dlg.ShowDialog() == true)
                     await RunHarnessUpdateAsync();
@@ -238,7 +238,7 @@ public partial class MainWindow
                 var message = $"当前版本：v{_appUpdater.LocalVersion}\n最新版本：v{_appUpdater.LatestVersion}\n";
                 if (notes is not null)
                     message += $"\n更新内容：\n{notes}\n";
-                message += "\n下载期间服务不受影响；下载完成后应用将自动重启完成更新，重启时服务短暂中断（约 10~30 秒）。是否继续？";
+                message += "\n下载期间服务不受影响；下载完成后自动重启完成更新（服务中断约 10~30 秒）。是否继续？";
                 var dlg = new Views.ConfirmDialog("发现新版本",
                     message,
                     "下载更新", "暂不") { Owner = this };
@@ -269,7 +269,7 @@ public partial class MainWindow
     private void ConfirmInstallAppUpdate()
     {
         var dlg = new Views.ConfirmDialog("应用更新已就绪",
-            $"已下载 v{_appUpdater.LatestVersion}。是否现在重启应用完成更新？\n重启时服务短暂中断（约 10~30 秒）。",
+            $"v{_appUpdater.LatestVersion} 已下载完成，重启应用后生效。\n重启期间服务会中断约 10~30 秒。",
             "立即重启", "稍后") { Owner = this };
         if (dlg.ShowDialog() == true)
             InstallDownloadedAppUpdate();

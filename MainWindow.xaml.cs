@@ -185,7 +185,7 @@ public partial class MainWindow : Window
             if (IsWebView2RuntimeMissing(ex))
                 // Runtime 缺失（Win10/精简系统）：给专用引导卡而非笼统的"初始化失败"
                 ShowError("缺少 WebView2 Runtime",
-                    "应用需要 Microsoft Edge WebView2 Runtime 才能显示界面。\n点击「下载 WebView2 Runtime」获取官方安装包，安装完成后点「重试」（无需重启应用）。",
+                    "当前系统没有安装 WebView2 Runtime，界面无法显示。\n点下方按钮下载官方安装包，装好后点「重试」，不用重启应用。",
                     allowRetry: true, showRuntimeDownload: true);
             else
                 ShowError("初始化失败", ex.Message);
@@ -342,7 +342,7 @@ public partial class MainWindow : Window
     {
         _heartbeat.Stop();
         WebView.Visibility = Visibility.Collapsed;
-        ShowError("服务连接已断开", detail + "\n点击重试重新拉起服务。", allowRetry: true);
+        ShowError("服务连接已断开", detail + "\n点「重试」重新拉起服务。", allowRetry: true);
     }
 
     // ---------------- 覆盖层控制 ----------------
@@ -633,7 +633,7 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             var dlg = new Views.ConfirmDialog("更新正在进行",
-                "Harness 更新正在进行，关闭窗口将中断安装，可能导致 Harness 包不完整。\n\n确定要中断更新并关闭吗？",
+                "Harness 正在更新，现在关闭会中断安装，可能留下不完整的包。\n\n确定中断并关闭？",
                 "中断并关闭", "继续更新", okDanger: true) { Owner = this };
             if (dlg.ShowDialog() == true)
             {
@@ -674,7 +674,7 @@ public partial class MainWindow : Window
                 try
                 {
                     TrayIcon.ShowBalloonTip("DeepSeek Harness",
-                        "已最小化到托盘，服务继续运行。\n双击托盘图标恢复窗口，右键可退出。",
+                        "已最小化到托盘，服务继续运行。\n双击图标恢复窗口，右键退出。",
                         Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info);
                 }
                 catch (Exception ex)

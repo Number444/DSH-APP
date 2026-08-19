@@ -89,7 +89,7 @@
                   Style="{DynamicResource ToggleSwitchStyle}"
                   Checked="OnTrayCloseChanged"
                   Unchecked="OnTrayCloseChanged" />
-        <TextBlock Text="隐藏到系统托盘，双击图标恢复窗口，右键菜单可退出；关闭此项则关窗即停服退出。"
+        <TextBlock Text="隐藏到系统托盘：双击图标恢复窗口，右键菜单退出。关闭此项则关窗即停服退出。"
                    Margin="0,6,0,0"
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}"
@@ -105,7 +105,7 @@
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1"
                 Click="OpenDataDir_Click" />
-        <TextBlock Text="日志、窗口位置、更新下载、WebView2 数据等存放目录。"
+        <TextBlock Text="存放日志、窗口位置、更新下载和 WebView2 数据。"
                    Margin="0,6,0,0"
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}" />
@@ -235,7 +235,7 @@
                 BorderThickness="1"
                 Click="BtnClearCache_Click" />
         <TextBlock x:Name="CacheHint"
-                   Text="仅清理 WebView2 页面缓存（不动 Cookies / 网站数据，登录态保留）；运行中目录被占用，清理将在下次启动时执行。"
+                   Text="只清 WebView2 页面缓存，不动 Cookies 和网站数据，登录态保留。运行中缓存被占用，清理在下次启动时执行。"
                    Margin="0,6,0,0"
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}"

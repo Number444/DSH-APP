@@ -134,7 +134,7 @@ public partial class MainWindow
             {
                 if (!IsVisible) return;
                 var dlg = new Views.ConfirmDialog("应用更新已就绪",
-                    $"已下载 v{_appUpdater.LatestVersion}。是否现在重启应用完成更新？\n重启时服务短暂中断（约 10~30 秒）。",
+                    $"v{_appUpdater.LatestVersion} 已下载完成，重启应用后生效。\n重启期间服务会中断约 10~30 秒。",
                     "立即重启", "稍后") { Owner = this };
                 if (dlg.ShowDialog() == true)
                     InstallDownloadedAppUpdate();

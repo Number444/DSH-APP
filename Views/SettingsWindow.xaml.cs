@@ -18,9 +18,9 @@ public partial class SettingsWindow : Window
     private const int DWMWCP_ROUND = 2;
 
     private const string AuthMessage =
-        "为显示 DeepSeek 开放平台余额，需要读取 ~/.dsh/.credentials.yaml 中的 DEEPSEEK_API_KEY。\n\n" +
-        "该 Key 仅在本机内存中使用：不会写入本应用配置、不会写入日志、不会上传；" +
-        "你可以在设置页随时撤销授权。";
+        "显示余额需要读取 ~/.dsh/.credentials.yaml 中的 DEEPSEEK_API_KEY。\n\n" +
+        "Key 只在本机用于向 DeepSeek 官方接口查询余额：不写入本应用配置、不写进日志；" +
+        "可随时在设置页撤销授权。";
 
     private readonly Action<bool> _themeHandler;
 
@@ -158,7 +158,7 @@ public partial class SettingsWindow : Window
         var allowed = AppSettings.Current.AllowReadDshCredentials;
         if (allowed)
         {
-            AuthStatusText.Text = "已授权读取 dsh 凭据（~/.dsh/.credentials.yaml），余额将自动获取。";
+            AuthStatusText.Text = "已授权读取 dsh 凭据（~/.dsh/.credentials.yaml），余额自动获取。";
             BtnAuthAction.Content = "撤销 dsh 凭据读取授权";
             BtnAuthAction.Visibility = Visibility.Visible;
             ManualKeyPanel.Visibility = Visibility.Collapsed;
@@ -166,7 +166,7 @@ public partial class SettingsWindow : Window
         else
         {
             AuthStatusText.Text = CredentialsReader.CredentialsFileExists
-                ? "未授权读取 dsh 凭据，可点击重新授权；或手动填写 API Key。"
+                ? "未授权读取 dsh 凭据，可重新授权或手动填写 API Key。"
                 : "未检测到 dsh 凭据文件，可手动填写 API Key。";
             BtnAuthAction.Content = "重新授权";
             BtnAuthAction.Visibility = CredentialsReader.CredentialsFileExists
@@ -240,7 +240,7 @@ public partial class SettingsWindow : Window
             return;
         }
         var dlg = new ConfirmDialog("清理页面缓存",
-            "将清理 WebView2 页面缓存（Cache / Code Cache / GPUCache），不动 Cookies 与网站数据，登录态与页面设置保留。\n\n清理在下次启动时自动执行。是否标记？",
+            "清理 WebView2 页面缓存（Cache / Code Cache / GPUCache），不动 Cookies 和网站数据，登录态保留。\n\n缓存正在使用中，将在下次启动时自动清理。",
             "标记清理", "取消") { Owner = this };
         if (dlg.ShowDialog() != true) return;
         try
