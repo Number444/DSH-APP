@@ -274,8 +274,9 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- 左下角启动进度卡片（半透明，不喧宾夺主） -->
-                <Border Width="400"
+                <!-- 左下角启动进度卡片（半透明，不喧宾夺主；x:Name 供启动入场动画播放） -->
+                <Border x:Name="ProgressCard"
+                        Width="400"
                         Margin="20,0,0,20"
                         Padding="20,16"
                         HorizontalAlignment="Left"
@@ -318,12 +319,40 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <ProgressBar x:Name="OverlayProgress"
-                                     Margin="0,10,0,0"
-                                     Height="3"
-                                     IsIndeterminate="True"
-                                     Foreground="{DynamicResource AccentBlueBrush}"
-                                     Background="{DynamicResource TrackBgBrush}" />
+                        <!-- 自定义进度条：像素点阵屏（PixelGrid 由代码生成，90 列 × 2 行正方形像素
+                             固定不动，进度 = 点亮列数，前沿列亮白）+ 彗尾光柱群（ProgressTail 由代码生成，
+                             在已点亮区域内分布式漂移）。
+                             进度真实驱动：启动期步骤状态机 N/5、下载期真实字节百分比（SetProgress）。 -->
+                        <Grid x:Name="OverlayProgress"
+                              Margin="0,10,0,0"
+                              Height="8">
+                            <Grid.Effect>
+                                <DropShadowEffect BlurRadius="10"
+                                                  Color="#FF58A6FF"
+                                                  Opacity="0.4"
+                                                  ShadowDepth="0" />
+                            </Grid.Effect>
+                            <Border Background="{DynamicResource TrackBgBrush}"
+                                    ClipToBounds="True"
+                                    CornerRadius="4">
+                                <Grid>
+                                    <!-- 像素点阵屏：90 列 × 2 行正方形像素（3px 格 + 1px 细缝），固定在轨道上
+                                         永不动；颜色按列采样黑→主题蓝渐变；进度 = 点亮列数（熄灭态 12% 透明度
+                                         呈屏幕点阵质感），前沿列亮白。由代码生成（BuildPixelScreen）。 -->
+                                    <Canvas x:Name="PixelGrid"
+                                            IsHitTestVisible="False" />
+                                    <!-- 彗尾裁剪容器：宽度动画驱动彗尾只在已点亮区域流动 -->
+                                    <Grid x:Name="ProgressFill"
+                                          Width="0"
+                                          HorizontalAlignment="Left"
+                                          ClipToBounds="True">
+                                        <Canvas x:Name="ProgressTail"
+                                                ClipToBounds="True"
+                                                IsHitTestVisible="False" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
 
                         <!-- 应用更新下载取消按钮（仅下载阶段可见） -->
                         <Button x:Name="CancelDownloadButton"

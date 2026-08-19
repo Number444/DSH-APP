@@ -161,6 +161,12 @@ public partial class MainWindow : Window
         _steps.Add(new StepRow(ServerStep.Load, "加载界面"));
         StepList.ItemsSource = _steps;
 
+        // 进度条彗尾光柱群 + 条宽变化即时同步（窗口尺寸/DPI 变化）；
+        // 彗尾锚点按填充宽比例分布：填充宽动画期间逐帧重分布（光柱随条平滑右移）
+        BuildProgressTail();
+        OverlayProgress.SizeChanged += (_, _) => OnProgressTrackSizeChanged();
+        ProgressFill.SizeChanged += (_, _) => RedistributeTail();
+
         App.ActiveServer = _server;
 
         Loaded += OnLoaded;
@@ -468,13 +474,29 @@ public partial class MainWindow : Window
             ? "正在拉起 dsh web 服务并等待就绪，首次启动可能需要 10~20 秒…"
             : tail.TrimEnd();
         OverlayLogScroller.ScrollToEnd();
+        // 入场动画：开头 0.3s 纯空白静待，品牌区上方抛入，进度卡片再压后 250ms 下方抛入（R2 主次有序）
+        PopupAnimator.PlayOpen(CenterBrand, new Point(0, -24), Entrance);
+        PopupAnimator.PlayOpen(ProgressCard, new Point(0, 24), EntranceDelayed);
     }
+
+    /// <summary>启动页入场档：菜单同款抛出回弹，但时长拉到 1.2s——启动头 0.5~1s WebView2
+    /// 初始化有卡顿，480ms 菜单档会整段埋在卡顿里（等于没播）；拉长后才真正可见。
+    /// BeginMs 300：开头先留 0.3s 纯空白（静待），再抛入——盖住启动卡顿最重的头段。
+    /// StartScale 收到 0.85：大块品牌区慢速从 0.5 放大观感是"变焦"而非"抛出"；
+    /// 模糊半径/时长同步收小拉长，避免大面积长时逐帧模糊加重启动期渲染压力。</summary>
+    private static readonly PopupAnimator.OpenOptions Entrance = new()
+    { DurationMs = 1200, FadeMs = 450, BlurRadius = 14, BlurMs = 800, StartScale = 0.85, BeginMs = 300 };
+
+    /// <summary>进度卡片入场档：同 Entrance + 再压后 250ms（迟于品牌区，主次有序；全程约 1.75s）。</summary>
+    private static readonly PopupAnimator.OpenOptions EntranceDelayed = new()
+    { DurationMs = 1200, FadeMs = 450, BlurRadius = 14, BlurMs = 800, StartScale = 0.85, BeginMs = 550 };
 
     /// <summary>重置全部步骤为待执行（重试/重新启动时调用）。</summary>
     private void ResetSteps()
     {
         foreach (var row in _steps)
             row.Update(StepStatus.Pending, "");
+        SetProgress(0, smooth: false); // 进度条同步归零
     }
 
     /// <summary>更新某一步骤的状态（来自 ServerController 事件或本窗口）。</summary>
@@ -482,7 +504,11 @@ public partial class MainWindow : Window
     {
         var row = _steps.FirstOrDefault(r => r.Step == step);
         if (row is not null)
+        {
             row.Update(status, detail);
+            // 进度条真实驱动：完成 N 步 → N/总步数（400ms 平滑推移，与步骤行点亮同步）
+            SetProgress(_steps.Count(r => r.Status == StepStatus.Done) * 100.0 / _steps.Count);
+        }
     }
 
     /// <summary>
@@ -525,6 +551,8 @@ public partial class MainWindow : Window
         OverlayActions.Visibility = Visibility.Visible;
         RetryButton.Visibility = allowRetry ? Visibility.Visible : Visibility.Collapsed;
         RuntimeButton.Visibility = showRuntimeDownload ? Visibility.Visible : Visibility.Collapsed;
+        // 错误区入场（同启动页慢入场档，上方抛入；进度卡片不重播——它可能早已静止在场）
+        PopupAnimator.PlayOpen(CenterError, new Point(0, -24), Entrance);
     }
 
     /// <summary>淡出并收起覆盖层；调用前必须先显示 WebView2（R1 时序）。</summary>

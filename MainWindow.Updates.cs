@@ -406,7 +406,7 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>下载进度回调（AppUpdater 已节流 250ms）：更新覆盖层副标题，不阻塞下载线程。</summary>
+    /// <summary>下载进度回调（AppUpdater 已节流 250ms）：更新覆盖层副标题 + 进度条真实百分比，不阻塞下载线程。</summary>
     private void OnAppDownloadProgress(long read, long total)
     {
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
@@ -415,6 +415,7 @@ public partial class MainWindow
             CenterSubtitle.Text = total > 0
                 ? $"正在下载应用更新… {read / 1048576.0:F1} / {total / 1048576.0:F0} MB（{read * 100 / total}%）"
                 : $"正在下载应用更新… {read / 1048576.0:F1} MB";
+            if (total > 0) SetProgress(read * 100.0 / total); // 进度条直驱真实字节百分比
         });
     }
 

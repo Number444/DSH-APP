@@ -70,8 +70,10 @@ public static class PopupAnimator
         }
 
         var dur = TimeSpan.FromMilliseconds(options.DurationMs);
-        // 淡入比总时长快（弹性档 240ms），保证"惯性滑出"发生时透明度已高、肉眼可见
-        var fadeIn = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(Math.Min(240, options.DurationMs))))
+        // 淡入比总时长快（菜单档 240ms），保证"惯性滑出"发生时透明度已高、肉眼可见；
+        // FadeMs 显式指定时优先（慢入场档需要更长的呼吸式淡入，240ms 快闪满会削弱慢速漂浮感）
+        var fadeIn = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(
+            options.FadeMs > 0 ? options.FadeMs : Math.Min(240, options.DurationMs))))
         { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
         // 缩放（质感档）：全程平滑展开（0.5→1.0，70% 与落位同步到位），不过冲——
         // "惯性"由位置承担（见 BuildGlideBack），缩放过冲观感是"猛地鼓一下"，位置惯性才是落位弹回
@@ -104,6 +106,17 @@ public static class PopupAnimator
         }
         // 模糊渐清：匀速贯穿大部分动画（不设 EasingFunction = 默认线性，避免前段骤减），放大期间全程可见"模糊渐变"
         var clear = new DoubleAnimation(options.BlurRadius, 0, new Duration(TimeSpan.FromMilliseconds(options.BlurMs)));
+
+        // 延迟入场（编排用）：所有时间线统一 BeginTime，延迟期间保持起始态（首帧即透明+偏移，不闪最终态）
+        if (options.BeginMs > 0)
+        {
+            var bt = TimeSpan.FromMilliseconds(options.BeginMs);
+            fadeIn.BeginTime = bt;
+            growTx.BeginTime = bt;
+            growTy.BeginTime = bt;
+            glideTy.BeginTime = bt;
+            clear.BeginTime = bt;
+        }
 
         // 先挂完成回调再开播；主动画（growTx，总时长最晚）完成时释放 Effect
         if (blur is not null)
@@ -227,6 +240,10 @@ public static class PopupAnimator
         public double BlurMs { get; set; } = 420;
         public bool Elastic { get; set; } = true;
         public bool Fly { get; set; } = true;
+        /// <summary>延迟入场（毫秒；编排主次有序用，如启动页进度卡片压后于品牌区）。</summary>
+        public double BeginMs { get; set; }
+        /// <summary>淡入时长（毫秒；0 = 自动取 min(240, DurationMs)）。慢入场档建议显式给 400~600ms。</summary>
+        public double FadeMs { get; set; }
     }
 
     /// <summary>缩放关键帧：start→1.0（70% 与落位同步到位），此后保持——全程平滑，无过冲（惯性由位置承担）。</summary>

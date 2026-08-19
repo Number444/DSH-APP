@@ -219,6 +219,9 @@ public sealed class StepRow : INotifyPropertyChanged
     public ServerStep Step { get; }
     public string Name { get; }
 
+    /// <summary>当前状态（进度条统计完成步数用）。</summary>
+    public StepStatus Status => _status;
+
     public StepRow(ServerStep step, string name)
     {
         Step = step;
