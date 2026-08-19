@@ -123,6 +123,9 @@ public partial class App : Application
         // 任何 FileLog.Append 之前（此时 FlushLoop 尚未启动，无写盘竞争）。
         FileLog.TrimIfOversize();
 
+        // WebView2 页面缓存延迟清理：设置页标记后在此执行（须在 WebView2 初始化前，运行时目录被锁定）
+        WebView2CacheCleaner.RunPendingCleanup();
+
         // 主题初始化（读设置 → 应用配色 → 订阅系统主题变化），须先于主窗口创建
         ThemeManager.Initialize();
 

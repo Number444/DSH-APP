@@ -1,6 +1,7 @@
 <Window x:Class="dsh_app.Views.ConfirmDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:helpers="clr-namespace:dsh_app.Helpers"
         Width="440"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
@@ -21,12 +22,25 @@
                        TextWrapping="Wrap"
                        VerticalAlignment="Center" />
         </StackPanel>
-        <TextBlock x:Name="MessageText"
-                   Margin="0,12,0,0"
-                   FontSize="13"
-                   LineHeight="20"
-                   TextWrapping="Wrap"
-                   Foreground="{DynamicResource TextSecondaryBrush}" />
+        <!-- 长文本（如更新 changelog）超 320px 出现滚动条；短消息不受影响（§6.2 统一 CustomScrollBar） -->
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="16" />
+            </Grid.ColumnDefinitions>
+            <ScrollViewer x:Name="MessageScroller"
+                          MaxHeight="320"
+                          VerticalScrollBarVisibility="Hidden">
+                <TextBlock x:Name="MessageText"
+                           FontSize="13"
+                           LineHeight="20"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+            </ScrollViewer>
+            <helpers:CustomScrollBar Grid.Column="1"
+                                     Width="16"
+                                     TargetScrollViewer="{Binding ElementName=MessageScroller}" />
+        </Grid>
         <StackPanel Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,20,0,0">

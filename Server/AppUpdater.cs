@@ -69,6 +69,17 @@ public sealed class AppUpdater : IDisposable
     /// <summary>最近一次检查到的 SHA256 校验文件地址（同 release）。</summary>
     public string? LatestShaUrl { get; private set; }
 
+    /// <summary>最新 Release 的更新说明（body，Markdown 纯文本展示不渲染，截断 1000 字符；无内容/无更新为 null）。</summary>
+    public string? LatestReleaseNotes { get; private set; }
+
+    /// <summary>截断 Release body 到合理长度（防超长弹窗）；空白内容归一为 null（调用方回退默认文案）。</summary>
+    private static string? TruncateNotes(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        var t = body.Trim();
+        return t.Length > 1000 ? t[..1000] + "\n…" : t;
+    }
+
     /// <summary>下载校验通过后的新 exe 路径（.new；未下载为 null）。</summary>
     public string? DownloadedNewExePath { get; private set; }
 
@@ -124,6 +135,7 @@ public sealed class AppUpdater : IDisposable
                 LatestVersion = null;
                 LatestDownloadUrl = null;
                 LatestShaUrl = null;
+                LatestReleaseNotes = null;
                 LastError = null;
                 return true;
             }
@@ -166,6 +178,7 @@ public sealed class AppUpdater : IDisposable
                 LatestVersion = version;
                 LatestDownloadUrl = null;
                 LatestShaUrl = null;
+                LatestReleaseNotes = null;
                 LastCheckSucceeded = true;
                 HasUpdate = false;
                 LastError = null;
@@ -198,6 +211,10 @@ public sealed class AppUpdater : IDisposable
             LatestVersion = version;
             LatestDownloadUrl = exeUrl;
             LatestShaUrl = shaUrl;
+            // Release 说明顺带存下（更新确认弹窗展示；纯文本不渲染 Markdown）
+            LatestReleaseNotes = root.TryGetProperty("body", out var bodyEl) && bodyEl.ValueKind == JsonValueKind.String
+                ? TruncateNotes(bodyEl.GetString())
+                : null;
             LastCheckSucceeded = true;
             LastError = null;
             HasUpdate = true;

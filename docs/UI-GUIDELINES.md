@@ -1,7 +1,7 @@
 # dsh-app 窗口架构与 UI 规范
 
 > 统一窗口架构与视觉规范的权威文件。所有对 MainWindow 的改动必须先读这里。
-> 更新时间：2026-08-14
+> 更新时间：2026-08-19
 
 ---
 
@@ -95,7 +95,7 @@
 
 **规则 R3（时序铁律）**：窗口弹出**第一帧**必须可见反馈（`ShowLoading()` 放在 `OnLoaded` 最前，先于 `InitWebViewAsync`）。任何 await 之前 UI 必须已有"进行中"呈现。
 
-**规则 R4（线程）**：ServerController 全程 async（含端口探测 `SendAsync`），**禁止在 UI 线程同步阻塞**。后台线程 → UI 统一 `Dispatcher.Invoke`。
+**规则 R4（线程）**：ServerController 全程 async（含端口探测 `SendAsync`），**禁止在 UI 线程同步阻塞**。后台线程 → UI 统一 `DispatchUi`（`Dispatcher.BeginInvoke` 异步派发，v1.3.3 起——日志洪峰时同步 Invoke 会阻塞管道读取线程；同优先级 FIFO 保证顺序，关闭期派发异常就地吞掉）。
 
 ---
 
@@ -202,6 +202,6 @@
 1. **颜色在 `Resources/Colors.Dark.xaml` / `Colors.Light.xaml`（双套同名 key），样式在 `Resources/Theme.xaml`**（App.xaml 合并：`[0]` 配色、`[1]` 样式）。**新增颜色两套同 key 都加；样式一律 `DynamicResource` 引用**；禁止 XAML 内联写死（C# 代码内颜色常量除外，如 `StepRow` 的状态色）。
 2. **滚动条统一用 `helpers:CustomScrollBar`**（自 `Toolbox` 移植，`Helpers/CustomScrollBar.cs`）：ScrollViewer 设 `VerticalScrollBarVisibility="Hidden"`，与 CustomScrollBar 并列在 Grid 中（宽 16），`TargetScrollViewer` 绑定——四档过渡（拖拽 > 悬停 Thumb > 悬停 Bar > 常态）由控件内部驱动，禁止叠系统滚动条。
 3. 覆盖层元素命名：`Overlay` 前缀（`OverlayProgress` / `OverlayDetail` / `OverlayActions`）或分区名（`CenterBrand` / `CenterError`）。
-4. 后台事件 → UI 一律 `Dispatcher.Invoke`，禁止直接触碰控件。
+4. 后台事件 → UI 一律 `DispatchUi`（BeginInvoke 异步派发，R4），禁止直接触碰控件。
 5. 日志双通道：`AppendLog`（UI 展示 + app.log 落盘）由 `_server.Log` 驱动，新增诊断信息走同一通道。
 6. 新增 UI 区域必须先过本规范：**R1（airspace）→ R2（主次）→ R3（首帧反馈）→ R4（线程）→ R5（对齐）**。

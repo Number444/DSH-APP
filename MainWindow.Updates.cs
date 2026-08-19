@@ -233,9 +233,14 @@ public partial class MainWindow
 
             if (_appUpdater.HasUpdate)
             {
+                // Release 说明（Markdown 纯文本展示，不渲染；为空回退无 changelog 文案）
+                var notes = _appUpdater.LatestReleaseNotes;
+                var message = $"当前版本：v{_appUpdater.LocalVersion}\n最新版本：v{_appUpdater.LatestVersion}\n";
+                if (notes is not null)
+                    message += $"\n更新内容：\n{notes}\n";
+                message += "\n下载期间服务不受影响；下载完成后应用将自动重启完成更新，重启时服务短暂中断（约 10~30 秒）。是否继续？";
                 var dlg = new Views.ConfirmDialog("发现新版本",
-                    $"当前版本：v{_appUpdater.LocalVersion}\n最新版本：v{_appUpdater.LatestVersion}\n\n" +
-                    "下载期间服务不受影响；下载完成后应用将自动重启完成更新，重启时服务短暂中断（约 10~30 秒）。是否继续？",
+                    message,
                     "下载更新", "暂不") { Owner = this };
                 if (dlg.ShowDialog() == true)
                     await RunAppUpdateAsync();

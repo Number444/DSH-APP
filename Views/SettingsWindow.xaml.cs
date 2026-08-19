@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -45,6 +46,9 @@ public partial class SettingsWindow : Window
         ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
         UpdateAlertUI();
         UpdateBalanceOptions();
+        // 缓存清理已标记的状态回显
+        if (WebView2CacheCleaner.IsMarked)
+            CacheHint.Text = "已标记清理，将在下次启动时执行。";
         _initializing = false;
 
         // 主题切换时联动标题栏深色（关闭时解除，防订阅泄漏）
@@ -207,6 +211,46 @@ public partial class SettingsWindow : Window
         catch
         {
             // 打不开链接不影响使用
+        }
+    }
+
+    // ---------------- 数据目录与缓存 ----------------
+
+    /// <summary>打开应用数据目录（%LOCALAPPDATA%\dsh-app）；不存在先创建（与 MainWindow.OpenLog 同模式）。</summary>
+    private void OpenDataDir_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(WebView2CacheCleaner.AppDataDir);
+            Process.Start(new ProcessStartInfo("explorer.exe",
+                $"\"{WebView2CacheCleaner.AppDataDir}\"") { UseShellExecute = true });
+        }
+        catch
+        {
+            // 打开失败不影响使用
+        }
+    }
+
+    /// <summary>清理页面缓存：运行中目录被 WebView2 锁定，确认后只写标记，下次启动时执行清理。</summary>
+    private void BtnClearCache_Click(object sender, RoutedEventArgs e)
+    {
+        if (WebView2CacheCleaner.IsMarked)
+        {
+            CacheHint.Text = "已标记清理，将在下次启动时执行。";
+            return;
+        }
+        var dlg = new ConfirmDialog("清理页面缓存",
+            "将清理 WebView2 页面缓存（Cache / Code Cache / GPUCache），不动 Cookies 与网站数据，登录态与页面设置保留。\n\n清理在下次启动时自动执行。是否标记？",
+            "标记清理", "取消") { Owner = this };
+        if (dlg.ShowDialog() != true) return;
+        try
+        {
+            WebView2CacheCleaner.MarkForCleanup();
+            CacheHint.Text = "已标记清理，将在下次启动时执行。";
+        }
+        catch (Exception ex)
+        {
+            CacheHint.Text = $"标记失败：{ex.Message}";
         }
     }
 
