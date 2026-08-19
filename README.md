@@ -1,6 +1,6 @@
 # dsh-app — DeepSeek Harness 桌面壳
 
-> v1.3.0(2026-08-14)
+> v1.4.0(2026-08-19)
 
 把 DeepSeek Harness Web GUI 封装成独立 Windows 桌面应用(WPF + WebView2,纯壳零侵入)。
 
@@ -16,7 +16,8 @@
 - **接管身份验证**:外部 dsh 经 PID + 命令行双重验证后才接管清理,非 dsh 程序绝不误杀
 - **主题系统**:深色 / 浅色 / 跟随系统(读系统主题 + 实时监听),全 DynamicResource 动态切换
 - **Harness 更新**:顶栏菜单"检查 Harness 更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);用户确认后停服 → `npm install -g` → 自动重启,全程日志可见
-- **应用自更新**:顶栏菜单"检查应用更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);GitHub Releases 检查 → 下载(进度/可取消)→ SHA256 校验 → 更新器覆盖单 exe → 自动重启;失败自动回滚;托盘化期间下载继续
+- **应用自更新**:顶栏菜单"检查应用更新"(发现新版高亮提示)+ 启动后台自动检查(默认开,设置可关);GitHub Releases 检查 → 下载(进度/可取消)→ SHA256 校验 → 更新器覆盖单 exe → 自动重启;失败自动回滚;托盘化期间下载继续;**确认弹窗展示该版本的 Release 说明（changelog）**
+- **维护入口**:设置页「打开数据目录」直达日志/数据存放位置;「清理页面缓存」标记后下次启动自动清理(只清缓存,不动登录态)
 - **诊断信息面板**:一键收集壳版本 / node 版本 / dsh 版本 / 端口 / 代理状态 / GitHub 连通性等,纯文本一键复制(绝不含任何凭据)
 - **顶栏余额显示**:菜单右侧常驻 DeepSeek 开放平台剩余资金(¥),60s 自动刷新;左键弹出菜单(刷新余额 / 打开充值页),刷新结果在按钮下方状态卡反馈;余额状态色:≥¥5 公共蓝 / ¥2~5 告警黄 / <¥2 危险红;API Key 经用户确认授权后自动读取 dsh 凭据,或设置页手动填写(DPAPI 加密)
 - **余额告警**:跌破阈值(默认 ¥5,可调)弹系统通知,点击通知直达充值页;仅跨越阈值提醒一次,不轰炸
@@ -35,9 +36,9 @@
 | 服务运行中崩溃 | 错误卡片"服务连接已断开" + 重试(接管模式靠心跳感知) |
 | 渲染进程崩溃 | 自动刷新一次,再崩溃 → 错误卡片 |
 | 重复双击 / 多版本并存 | 单实例（进程扫描权威判定 + 会话级互斥体辅助；同会话任意版本/僵尸实例一律拦截）,激活已有窗口后退出 |
-| 环境缺失(未装 node/dsh) | 错误卡片直接给出安装步骤指引 |
+| 环境缺失(未装 node/dsh) | 错误卡片直接给出安装步骤指引；缺 WebView2 Runtime 时给下载引导卡（装完点重试，免重启应用） |
 
-日志位置:`%LOCALAPPDATA%\dsh-app\app.log`(服务器输出与壳日志)。
+日志位置:`%LOCALAPPDATA%\dsh-app\app.log`(服务器输出与壳日志;超 2MB 启动时自动截断)。
 
 ## 构建与发布
 
@@ -47,7 +48,7 @@ dotnet build -c Release
 
 # 发布:self-contained 单 exe(目标机免装 .NET,拷走即用)
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-# 产物: bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe (~127MB)
+# 产物: bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe (~148MB)
 ```
 
 ## 部署到另一台电脑
