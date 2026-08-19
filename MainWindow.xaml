@@ -249,6 +249,18 @@
                                 Foreground="{DynamicResource TextPrimaryBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1" />
+                        <!-- 仅 Runtime 缺失错误卡可见：引导用户下载官方安装包 -->
+                        <Button x:Name="RuntimeButton"
+                                Content="下载 WebView2 Runtime"
+                                Margin="12,0,0,0"
+                                Padding="24,9"
+                                Click="RuntimeButton_Click"
+                                Style="{DynamicResource RoundedButton}"
+                                Background="{DynamicResource BgCardBrush}"
+                                Foreground="{DynamicResource TextPrimaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                Visibility="Collapsed" />
                     </StackPanel>
                 </StackPanel>
 

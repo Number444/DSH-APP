@@ -88,19 +88,22 @@ public partial class MainWindow : Window
         InitializeComponent();
         VersionFooter.Text = $"dsh-app v{App.AppVersion} · DeepSeek Harness 桌面壳";
 
-        _server.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
-        _server.StepChanged += (step, status, detail) => Dispatcher.Invoke(() => UpdateStep(step, status, detail));
-        _server.ServerDied += () => Dispatcher.Invoke(OnServerDied);
+        // 事件订阅统一走 DispatchUi（BeginInvoke 异步派发）：npm install 输出洪峰时
+        // 不再阻塞管道读取线程等 UI；同优先级 FIFO 保证日志行顺序。
+        // 注意：步骤状态与日志的相对先后可能错开（冒烟时重点观察覆盖层步骤行与日志区）。
+        _server.Log += msg => DispatchUi(() => AppendLog(msg));
+        _server.StepChanged += (step, status, detail) => DispatchUi(() => UpdateStep(step, status, detail));
+        _server.ServerDied += () => DispatchUi(OnServerDied);
 
         // Harness 更新器：日志走同一通道
-        _updater.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
+        _updater.Log += msg => DispatchUi(() => AppendLog(msg));
 
         // 应用（壳自身）更新器：日志走同一通道
-        _appUpdater.Log += msg => Dispatcher.Invoke(() => AppendLog(msg));
+        _appUpdater.Log += msg => DispatchUi(() => AppendLog(msg));
 
         // 余额监控：回调经 Dispatcher 上 UI（R4 线程铁律）
-        _balance.BalanceChanged += text => Dispatcher.Invoke(() => OnBalanceChanged(text));
-        _balance.BalanceAmountChanged += amount => Dispatcher.Invoke(() => OnBalanceAmountChanged(amount));
+        _balance.BalanceChanged += text => DispatchUi(() => OnBalanceChanged(text));
+        _balance.BalanceAmountChanged += amount => DispatchUi(() => OnBalanceAmountChanged(amount));
 
         // 顶栏菜单：公共菜单控件 + 数据驱动菜单项（更新状态高亮由 UpdateMenuItems 维护）
         TopMenu.ItemClicked += OnTopMenuClicked;
@@ -179,7 +182,13 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ShowError("初始化失败", ex.Message);
+            if (IsWebView2RuntimeMissing(ex))
+                // Runtime 缺失（Win10/精简系统）：给专用引导卡而非笼统的"初始化失败"
+                ShowError("缺少 WebView2 Runtime",
+                    "应用需要 Microsoft Edge WebView2 Runtime 才能显示界面。\n点击「下载 WebView2 Runtime」获取官方安装包，安装完成后点「重试」（无需重启应用）。",
+                    allowRetry: true, showRuntimeDownload: true);
+            else
+                ShowError("初始化失败", ex.Message);
         }
 
         // 上次应用自更新回滚提示（标记由更新器脚本写入；展示后删除）
@@ -382,7 +391,34 @@ public partial class MainWindow : Window
             row.Update(status, detail);
     }
 
-    private void ShowError(string title, string detail, bool allowRetry = false)
+    /// <summary>
+    /// 异步派发到 UI 线程（BeginInvoke，不阻塞来源线程）。
+    /// 关闭期派发异常就地吞掉（与 BalanceMonitor.Dispatch 同一惯例）：
+    /// Dispatcher 关闭后 BeginInvoke/回调执行都可能抛，静默忽略即可。
+    /// </summary>
+    private void DispatchUi(Action action)
+    {
+        try
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch
+                {
+                    // 窗口销毁/关闭期回调异常：忽略（不击穿全局异常兜底）
+                }
+            });
+        }
+        catch
+        {
+            // Dispatcher 已关闭：忽略
+        }
+    }
+
+    private void ShowError(string title, string detail, bool allowRetry = false, bool showRuntimeDownload = false)
     {
         FadeInOverlay();
         CenterBrand.Visibility = Visibility.Collapsed;
@@ -394,6 +430,7 @@ public partial class MainWindow : Window
         OverlayProgress.Visibility = Visibility.Collapsed;
         OverlayActions.Visibility = Visibility.Visible;
         RetryButton.Visibility = allowRetry ? Visibility.Visible : Visibility.Collapsed;
+        RuntimeButton.Visibility = showRuntimeDownload ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>淡出并收起覆盖层；调用前必须先显示 WebView2（R1 时序）。</summary>
@@ -438,6 +475,29 @@ public partial class MainWindow : Window
     }
 
     private void LogButton_Click(object sender, RoutedEventArgs e) => OpenLog();
+
+    /// <summary>打开 WebView2 Runtime 官方下载页（与"打开浏览器/充值页"同模式）。</summary>
+    private void RuntimeButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://developer.microsoft.com/microsoft-edge/webview2/") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开 Runtime 下载页失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>判定异常链中是否为 WebView2 Runtime 缺失（CreateAsync/EnsureCoreWebView2Async 抛出，含内层包装）。</summary>
+    private static bool IsWebView2RuntimeMissing(Exception ex)
+    {
+        for (var cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            if (cur is WebView2RuntimeNotFoundException) return true;
+        }
+        return false;
+    }
 
     // ---------------- 顶栏按钮 ----------------
 
@@ -695,7 +755,7 @@ public partial class MainWindow : Window
         TrayMenuPopup.HorizontalOffset = offsetX;
         TrayMenuPopup.VerticalOffset = offsetY;
         // 抛出起点（直上直下，仅垂直分量）：菜单视觉位置在光标下方 → 从上方抛出，反向展开则从下方抛出，距离固定 14px
-        _trayFlyFrom = new Point(0, offsetY + AppMenuPanel.AnimSafePad > y / scale ? -14 : 14);
+        _trayFlyFrom = new Point(0, offsetY + AppMenuPanel.AnimSafePad > y ? -14 : 14);
         TrayMenuPopup.IsOpen = true;
     }
 
@@ -1038,8 +1098,19 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>启动后后台自动检查一次（默认开，设置里可关）；只提示不自动安装。</summary>
-    private async void MaybeAutoCheckUpdate()
+    /// <summary>
+    /// 启动后后台自动检查一次（默认开，设置里可关）；只提示不自动安装。
+    /// Harness 与应用两条检查并行（原串行：Harness 最坏 60s 超时期间应用检查干等）；
+    /// 各自保留防重入标志与设置开关判断，异常自吞记日志。
+    /// </summary>
+    private void MaybeAutoCheckUpdate()
+    {
+        // 两条检查续体均回 UI 线程（Dispatcher 串行化），UpdateMenuItems 整体重建 ItemsSource 幂等，重入安全
+        _ = AutoCheckHarnessAsync();
+        _ = AutoCheckAppAsync();
+    }
+
+    private async Task AutoCheckHarnessAsync()
     {
         if (_autoCheckRan || _updating || !AppSettings.Current.AutoCheckUpdate) return;
         _autoCheckRan = true;
@@ -1054,11 +1125,13 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            // 后台检查失败不打扰用户（写日志即可）；防 async void 未处理异常
+            // 后台检查失败不打扰用户（写日志即可）
             AppendLog($"自动检查更新异常：{ex.Message}");
         }
+    }
 
-        // 应用（壳自身）自动检查：独立防重入标志，与 Harness 互不干扰
+    private async Task AutoCheckAppAsync()
+    {
         if (_appAutoCheckRan || _appUpdating || !AppSettings.Current.AutoCheckAppUpdate) return;
         _appAutoCheckRan = true;
         try

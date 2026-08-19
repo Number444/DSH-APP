@@ -118,6 +118,11 @@ public partial class App : Application
             return;
         }
 
+        // 日志截断轮转：超 2MB 保留尾部 500KB。
+        // 放在单实例判定之后（第二实例不得截断第一实例正在写的日志）、
+        // 任何 FileLog.Append 之前（此时 FlushLoop 尚未启动，无写盘竞争）。
+        FileLog.TrimIfOversize();
+
         // 主题初始化（读设置 → 应用配色 → 订阅系统主题变化），须先于主窗口创建
         ThemeManager.Initialize();
 

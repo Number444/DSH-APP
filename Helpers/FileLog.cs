@@ -28,6 +28,59 @@ public static class FileLog
     /// <summary>日志文件路径（供"打开日志"等直接引用）。</summary>
     public static string LogFilePath => FilePath;
 
+    /// <summary>
+    /// 启动早期调用：日志文件超阈值（2MB）时截断、保留尾部约 500KB。
+    /// 必须在首次 Append 之前调用（此时 FlushLoop 尚未启动，无写盘竞争）；
+    /// 内存尾缓冲 Tail 不受影响。截断失败静默，不影响启动。
+    /// </summary>
+    public static void TrimIfOversize()
+    {
+        const long MaxBytes = 2L * 1024 * 1024;
+        const int KeepBytes = 500 * 1024;
+        lock (Sync)
+        {
+            try
+            {
+                if (!File.Exists(FilePath)) return;
+                var len = new FileInfo(FilePath).Length;
+                if (len <= MaxBytes) return;
+
+                byte[] tail;
+                using (var rd = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    rd.Seek(-KeepBytes, SeekOrigin.End);
+                    tail = new byte[KeepBytes];
+                    var read = 0;
+                    while (read < KeepBytes)
+                    {
+                        var n = rd.Read(tail, read, KeepBytes - read);
+                        if (n <= 0) break;
+                        read += n;
+                    }
+                    if (read < tail.Length) Array.Resize(ref tail, read);
+                }
+
+                // 丢弃首条残行：定位第一个 '\n'（UTF-8 中 0x0A 不会出现在多字节序列内，字节级查找安全）
+                var nl = Array.IndexOf(tail, (byte)'\n');
+                var body = nl >= 0 && nl + 1 < tail.Length ? tail[(nl + 1)..] : tail;
+
+                using (var wr = new FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    var bom = new UTF8Encoding(true).GetPreamble();
+                    wr.Write(bom, 0, bom.Length);
+                    wr.Write(body, 0, body.Length);
+                }
+                _bomEnsured = true;
+
+                Append($"[FileLog] app.log 超过 2MB，已截断保留末尾约 500KB（原大小 {len / 1024.0 / 1024:F1}MB）");
+            }
+            catch
+            {
+                // 截断失败不影响启动
+            }
+        }
+    }
+
     /// <summary>追加一行日志（任意线程；立即入内存尾缓冲，落盘异步批量）。</summary>
     public static void Append(string message)
     {
