@@ -28,6 +28,10 @@ public partial class SettingsWindow : Window
     /// <summary>构造期控件赋值会触发 Checked 事件，此标志屏蔽弹窗分支（审查加固：避免每次打开设置窗重弹授权）。</summary>
     private bool _initializing = true;
 
+    /// <summary>Key 输入框脏标志：框恒空显示，仅用户真正输入过才在失焦时处理（路过焦点不清除已保存 Key）。</summary>
+    private bool _apiKeyDirty;
+    private bool _kimiKeyDirty;
+
     public SettingsWindow()
     {
         InitializeComponent();
@@ -65,6 +69,9 @@ public partial class SettingsWindow : Window
         _themeHandler = _ => ApplyDwm();
         ThemeManager.ThemeChanged += _themeHandler;
         Closed += (_, _) => ThemeManager.ThemeChanged -= _themeHandler;
+        // Key 输入框脏标志跟踪（路过焦点不清除已保存 Key；Clear() 也会触发，保存路径内显式复位）
+        ApiKeyBox.PasswordChanged += (_, _) => _apiKeyDirty = true;
+        KimiApiKeyBox.PasswordChanged += (_, _) => _kimiKeyDirty = true;
         // Esc 关窗（输入框失焦已保存，Esc 关闭不丢数据）
         KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
     }
@@ -306,14 +313,18 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>失焦即保存（DPAPI 加密），输入框清空防明文残留；加密失败必须如实提示。</summary>
+    /// <summary>失焦即保存（DPAPI 加密），输入框清空防明文残留；加密失败必须如实提示。
+    /// 脏标志守卫：框恒空显示，用户未输入仅路过焦点时不得清除已保存 Key。</summary>
     private void ApiKeyBox_LostFocus(object sender, RoutedEventArgs e)
     {
+        if (!_apiKeyDirty) return;
+        _apiKeyDirty = false;
         var key = ApiKeyBox.Password.Trim();
         if (key.Length == 0)
         {
             AppSettings.Current.EncryptedApiKey = null;
             AppSettings.Current.Save();
+            ApiKeyHint.Text = "已清除手动 API Key。";
             return;
         }
         var encrypted = DpapiHelper.Encrypt(key);
@@ -326,17 +337,21 @@ public partial class SettingsWindow : Window
         AppSettings.Current.EncryptedApiKey = encrypted;
         AppSettings.Current.Save();
         ApiKeyBox.Clear();
+        _apiKeyDirty = false; // Clear() 触发 PasswordChanged 会再置脏，显式复位
         ApiKeyHint.Text = "已保存（DPAPI 加密存储）。";
     }
 
     /// <summary>Kimi Key 失焦即保存（与 DeepSeek 同模式：DPAPI 加密，清空防明文残留，失败如实提示）。</summary>
     private void KimiApiKeyBox_LostFocus(object sender, RoutedEventArgs e)
     {
+        if (!_kimiKeyDirty) return;
+        _kimiKeyDirty = false;
         var key = KimiApiKeyBox.Password.Trim();
         if (key.Length == 0)
         {
             AppSettings.Current.EncryptedKimiApiKey = null;
             AppSettings.Current.Save();
+            KimiApiKeyHint.Text = "已清除手动 Kimi API Key。";
             return;
         }
         var encrypted = DpapiHelper.Encrypt(key);
@@ -348,6 +363,7 @@ public partial class SettingsWindow : Window
         AppSettings.Current.EncryptedKimiApiKey = encrypted;
         AppSettings.Current.Save();
         KimiApiKeyBox.Clear();
+        _kimiKeyDirty = false; // Clear() 触发 PasswordChanged 会再置脏，显式复位
         KimiApiKeyHint.Text = "已保存（DPAPI 加密存储）。";
     }
 

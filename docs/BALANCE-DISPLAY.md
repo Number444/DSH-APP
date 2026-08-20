@@ -255,3 +255,11 @@ settings.json（`%LOCALAPPDATA%\dsh-app\`）扩展：
 - 诊断面板「余额显示」行标注当前来源。
 - **修复**：点余额菜单「刷新」时 `ShowBalanceStatus` 无条件 `BalanceMenuPopup.IsOpen = false` 会瞬关菜单、杀掉收拢动画——改为收拢动画在跑时不动它（`PopupAnimator.IsClosing` 新增公开查询；非菜单来源路径仍瞬关防叠显）。
 - **调参与钩子化**：状态卡轻量档 200ms/120ms 肉眼不可感知——`LightOpen` 320ms（FadeMs 260 / BlurMs 280 / 模糊 8）、`LightClose` 220ms；两档仅此一处调用，不影响菜单。**根因修复**：状态卡从 `StaysOpen=False`（系统级瞬关，绕过一切动画——实测"只有打开动画"的元凶）改为 `StaysOpen=True` 并接入全局鼠标钩子——点击外部经 `DismissBalanceStatus()` 播淡出（与自动消失同一入口，序号失效 + PlayClose 幂等防竞态）；钩子安装/卸载并入菜单同款 Install/IfIdle 流程。
+
+## 实现记录（未发布 · 2026-08-20 整体审查加固）
+
+- **来源热切换竞态**：`RefreshCoreAsync` 快照 `BalanceProviders.IsKimi`，三处派发闭包（成功/失败/PublishFailure）执行前校验来源未变，迟到旧来源响应一律丢弃（防 Kimi 文本串 DeepSeek 色阶/前缀）。
+- **RefreshFailed 事件**：KeepOld 失败路径（网络类）原先完全不发回调——用户手动刷新遇网络错误时状态卡永停"正在刷新…"且 pending 标志遗留致下次轮询误弹成功卡；新增 `BalanceMonitor.RefreshFailed`，状态卡提示"✗ 刷新失败：{原因}（保留上次值）"，后台轮询失败静默。
+- **解析健壮性**：`TryGetLong` 浮点兜底（300.0 不炸整窗）；`TryGetDecimal` 兼容 JSON 数值；duration 匹配改走 TryGetLong；百分比钳位 0~100；resetTime 无时区标记按 UTC 处理 + 兼容 Unix 时间戳（秒/毫秒启发）。
+- **防抖单调时钟**：`DateTime.UtcNow.Ticks` → `Environment.TickCount64`（NTP 回拨不影响）。
+- **Key 输入框脏标志**：PasswordBox 恒空显示，用户未输入仅路过焦点不再误清已保存 Key（DeepSeek/Kimi 两框同修；显式清空=输入后删光仍生效）。

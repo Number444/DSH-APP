@@ -175,6 +175,7 @@ public partial class MainWindow
 
     // ---------------- 菜单点击外部关闭（低级鼠标钩子） ----------------
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
     private const int WH_MOUSE_LL = 14;
@@ -202,8 +203,10 @@ public partial class MainWindow
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("kernel32.dll")]
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+    private const int MDT_EFFECTIVE_DPI = 0;
 
     [DllImport("shcore.dll")]
     private static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
@@ -248,10 +251,8 @@ public partial class MainWindow
                     {
                         try
                         {
-                            MenuPopups[0] = MenuPopup;
-                            MenuPopups[1] = BalanceMenuPopup;
-                            MenuPopups[2] = TrayMenuPopup;
-                            foreach (var popup in MenuPopups)
+                            // 局部数组：钩子回调高频触发，避免共享静态数组（虽 UI 线程串行无竞态，局部更干净）
+                            foreach (var popup in new[] { MenuPopup, BalanceMenuPopup, TrayMenuPopup })
                             {
                                 if (!popup.IsOpen) continue;
                                 if (IsAnchorHit(popup, pt)) continue; // 锚点命中：交给按钮 toggle
@@ -277,21 +278,24 @@ public partial class MainWindow
                                 if (!scRect.IsEmpty && !scRect.Contains(pt))
                                     DismissBalanceStatus();
                             }
-                            UninstallDismissHookIfIdle();
                         }
                         catch
                         {
                             // 关闭期 Dispatcher 异常等：忽略（菜单关闭是尽力而为）
                         }
+                        finally
+                        {
+                            UninstallDismissHookIfIdle(); // 全关则卸钩；内部判 IsOpen，提前异常也不漏
+                        }
                     });
                 }
             }
-            return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+            return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam); // 首参文档标注 ignored，传零
         }
         catch
         {
             // 钩子回调在系统钩子线程：任何托管异常逃逸都会终止进程，必须兜住
-            return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+            return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
         }
     }
 
@@ -305,9 +309,10 @@ public partial class MainWindow
             if (popup == BalanceMenuPopup)
                 return IsPointInElementScreenRect(TitleBalance, physPt);
             if (popup == TrayMenuPopup)
+                // 48 物理像素：高 DPI（200%+）下托盘图标本体可达 32px+，32 阈值会把图标边缘点击误判为外部点击
                 return _trayIconScreenPos is Point p &&
-                       Math.Abs(physPt.X - p.X) < 32 &&
-                       Math.Abs(physPt.Y - p.Y) < 32;
+                       Math.Abs(physPt.X - p.X) < 48 &&
+                       Math.Abs(physPt.Y - p.Y) < 48;
         }
         catch
         {
@@ -320,6 +325,8 @@ public partial class MainWindow
     private static bool IsPointInElementScreenRect(FrameworkElement element, Point physPt)
     {
         if (element.Visibility != Visibility.Visible) return false;
+        if (element.ActualWidth <= 0 || element.ActualHeight <= 0) return false; // 未布局完成
+        if (PresentationSource.FromVisual(element) is null) return false; // 未连接视觉树（GetDpi/PointToScreen 会抛）
         var dpi = VisualTreeHelper.GetDpi(element).PixelsPerDip;
         var topLeft = element.PointToScreen(new Point(0, 0)); // 物理像素
         var rect = new Rect(topLeft.X, topLeft.Y, element.ActualWidth * dpi, element.ActualHeight * dpi);

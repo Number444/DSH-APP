@@ -146,6 +146,13 @@ public partial class App : Application
             ActiveServer?.Shutdown();
         };
 
+        // 未观察的 Task 异常（fire-and-forget 失败等）：.NET 默认不终止进程，但不注册就丢诊断信息
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            WriteLog("[unobserved-task] " + args.Exception);
+            args.SetObserved();
+        };
+
         base.OnStartup(e);
 
         // 手动创建主窗口（无 StartupUri，便于单实例分支控制）

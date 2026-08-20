@@ -37,7 +37,7 @@ public partial class MainWindow
 
         // 深色跟随主题；自绘标题栏（WindowStyle=None）下恢复 Win11 原生圆角
         ApplyDwmTheme();
-        ThemeManager.ThemeChanged += _ => ApplyDwmTheme();
+        ThemeManager.ThemeChanged += OnThemeChangedApplyDwm; // 命名订阅：OnClosed 解除（静态事件不挂住窗口实例）
 
         int corner = DWMWCP_ROUND;
         _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
@@ -47,6 +47,9 @@ public partial class MainWindow
 
         WindowPlacementStore.Restore(this);
     }
+
+    /// <summary>主题切换时重套 DWM 深色属性（命名方法，便于 OnClosed 解除静态事件订阅）。</summary>
+    private void OnThemeChangedApplyDwm(bool _) => ApplyDwmTheme();
 
     // ---------------- 最大化钳制（无边框窗口经典修复） ----------------
 

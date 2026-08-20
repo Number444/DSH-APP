@@ -64,7 +64,15 @@ public static class ThemeManager
     {
         if (e.Category != UserPreferenceCategory.General || Current != AppTheme.System)
             return;
-        Application.Current?.Dispatcher.Invoke(ApplyNow);
+        try
+        {
+            // 系统事件线程：注销/关机时 Dispatcher 可能正在关闭，Invoke 抛异常必须兜住（逃逸即进程崩）
+            Application.Current?.Dispatcher.Invoke(ApplyNow);
+        }
+        catch
+        {
+            // 关闭期主题事件：忽略
+        }
     }
 
     /// <summary>替换配色字典（[0] 固定为 Colors.*.xaml），样式经 DynamicResource 自动跟随。</summary>

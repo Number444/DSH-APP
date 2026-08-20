@@ -231,9 +231,14 @@ internal sealed class DeepSeekBalanceProvider : BalanceProviderBase
     private static bool TryGetDecimal(JsonElement item, string property, out decimal value)
     {
         value = 0m;
-        if (!item.TryGetProperty(property, out var element) || element.ValueKind != JsonValueKind.String)
+        if (!item.TryGetProperty(property, out var element))
             return false;
-        return decimal.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        // 兼容 JSON 数值与字符串两种形态（API 微调不至于整窗解析失败）
+        if (element.ValueKind == JsonValueKind.Number)
+            return element.TryGetDecimal(out value);
+        if (element.ValueKind == JsonValueKind.String)
+            return decimal.TryParse(element.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        return false;
     }
 }
 
@@ -301,10 +306,10 @@ internal sealed class KimiUsageProvider : BalanceProviderBase
                 foreach (var item in limits.EnumerateArray())
                 {
                     if (!hasFirst) { first = item; hasFirst = true; }
+                    // duration 用宽容读取（TryGetLong：数值/字符串/浮点都接），避免 300.0 这类形态直接炸掉整窗解析
                     if (item.TryGetProperty("window", out var window) &&
-                        window.TryGetProperty("duration", out var duration) &&
-                        duration.ValueKind == JsonValueKind.Number &&
-                        duration.GetInt32() == 300 &&
+                        TryGetLong(window, "duration", out var durMinutes) &&
+                        durMinutes == 300 &&
                         window.TryGetProperty("timeUnit", out var unit) &&
                         unit.GetString() == "TIME_UNIT_MINUTE")
                     {
@@ -383,14 +388,27 @@ internal sealed class KimiUsageProvider : BalanceProviderBase
         if (!TryGetLong(holder, "used", out var used))
             return null;
 
-        var percent = used * 100m / limit;
+        // 钳位 0~100：API 统计延迟可能使 used 短暂大于 limit，百分比破百会让用户困惑
+        var percent = Math.Clamp(used * 100m / limit, 0m, 100m);
         DateTime? reset = null;
-        if (holder.TryGetProperty("resetTime", out var resetTime) &&
-            resetTime.ValueKind == JsonValueKind.String &&
-            DateTime.TryParse(resetTime.GetString(), CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind, out var parsed))
+        if (holder.TryGetProperty("resetTime", out var resetTime))
         {
-            reset = parsed.ToLocalTime();
+            if (resetTime.ValueKind == JsonValueKind.String &&
+                DateTime.TryParse(resetTime.GetString(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out var parsed))
+            {
+                // 无时区标记按 UTC 处理（服务端时间均为 UTC；RoundtripKind 下带 Z 为 Utc，无标记为 Unspecified）
+                reset = (parsed.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(parsed, DateTimeKind.Utc)
+                    : parsed).ToLocalTime();
+            }
+            else if (resetTime.ValueKind == JsonValueKind.Number && resetTime.TryGetInt64(out var ts))
+            {
+                // 兼容 Unix 时间戳（>1e12 按毫秒，否则按秒）
+                reset = (ts > 1_000_000_000_000
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(ts)
+                    : DateTimeOffset.FromUnixTimeSeconds(ts)).LocalDateTime;
+            }
         }
         return new QuotaWindow(limit, used, percent, reset);
     }
@@ -401,7 +419,17 @@ internal sealed class KimiUsageProvider : BalanceProviderBase
         if (!item.TryGetProperty(property, out var element))
             return false;
         if (element.ValueKind == JsonValueKind.Number)
-            return element.TryGetInt64(out value);
+        {
+            // 优先整数；浮点（如 300.0）截断兜底——API 序列化差异不至于丢弃整个窗口
+            if (element.TryGetInt64(out value))
+                return true;
+            if (element.TryGetDouble(out var d))
+            {
+                value = (long)d;
+                return true;
+            }
+            return false;
+        }
         if (element.ValueKind == JsonValueKind.String)
             return long.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
         return false;

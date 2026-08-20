@@ -168,6 +168,16 @@ public partial class MainWindow
 
     /// <summary>右键余额交互已删除（v1.2.1）：左键菜单内含刷新/充值；此注释占位防误加回。</summary>
 
+    /// <summary>手动刷新遇网络类失败（KeepOld 保留旧值路径）：仅用户触发的刷新弹状态卡反馈；
+    /// 后台轮询的同类失败静默（顶栏保留旧值，不打扰）。</summary>
+    private void OnBalanceRefreshFailed(string error)
+    {
+        if (!_userRefreshPending) return;
+        _userRefreshPending = false;
+        ShowBalanceStatus($"✗ 刷新失败：{error}（保留上次值）",
+            (Brush)FindResource("AccentRedBrush"));
+    }
+
     /// <summary>在余额按钮下方显示状态卡（自动关闭；序号防连续点击竞态；水平超屏左移钳位）。</summary>
     private async void ShowBalanceStatus(string text, Brush? brush = null, int stayMs = 2200)
     {
@@ -203,7 +213,8 @@ public partial class MainWindow
             catch { /* 钳位失败不影响显示 */ }
         }
         await Task.Delay(stayMs);
-        if (seq == _statusSeq)
+        // IsLoaded 守卫：窗口在延迟期间已关闭时不再触碰 Popup（托盘隐藏 IsLoaded 仍为 true，正常收拢不受影响）
+        if (seq == _statusSeq && IsLoaded)
             DismissBalanceStatus();
     }
 

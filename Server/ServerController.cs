@@ -265,9 +265,14 @@ public sealed class ServerController : IDisposable
         {
             // 覆盖引用前先释放旧的（防重入路径残留句柄/事件；正常路径 Shutdown 已清理，此处幂等）
             var old = _serverProcess;
-            if (old is not null && !old.HasExited)
+            if (old is not null)
             {
-                try { old.Kill(); } catch { /* 忽略 */ }
+                // 先停事件再杀：旧进程的 Exited/输出回调不应在新进程启动后触发（虽 _ready 前置已防误报，显式停更干净）
+                try { old.EnableRaisingEvents = false; } catch { /* 忽略 */ }
+                if (!old.HasExited)
+                {
+                    try { old.Kill(); } catch { /* 忽略 */ }
+                }
                 try { old.Dispose(); } catch { /* 忽略 */ }
             }
 
@@ -505,8 +510,12 @@ public sealed class ServerController : IDisposable
         if (_disposed) return;
         _disposed = true;
         _http.Dispose();
-        _serverProcess?.Dispose();
-        _serverProcess = null;
+        if (_serverProcess is not null)
+        {
+            try { _serverProcess.EnableRaisingEvents = false; } catch { /* 忽略 */ } // Dispose 后 Exited 不再触发
+            _serverProcess.Dispose();
+            _serverProcess = null;
+        }
         _ensureLock.Dispose();
     }
 }

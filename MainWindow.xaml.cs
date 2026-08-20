@@ -86,8 +86,6 @@ public partial class MainWindow : Window
     private Point? _trayIconScreenPos;
     /// <summary>托盘图标是否挂载成功（失败时关窗不得走"最小化到托盘"）。</summary>
     private bool _trayAvailable;
-    /// <summary>钩子热路径遍历的菜单集合（static 避免每次点击分配数组）。</summary>
-    private static readonly Popup[] MenuPopups = new Popup[3];
     /// <summary>托盘菜单打开动画的抛出起点（相对菜单位置；由 OpenTrayMenu 按光标方向计算）。</summary>
     private Point _trayFlyFrom;
 
@@ -112,6 +110,7 @@ public partial class MainWindow : Window
         // 余额监控：回调经 Dispatcher 上 UI（R4 线程铁律）
         _balance.BalanceChanged += text => DispatchUi(() => OnBalanceChanged(text));
         _balance.BalanceAmountChanged += amount => DispatchUi(() => OnBalanceAmountChanged(amount));
+        _balance.RefreshFailed += err => DispatchUi(() => OnBalanceRefreshFailed(err));
 
         // 顶栏菜单：公共菜单控件 + 数据驱动菜单项（更新状态高亮由 UpdateMenuItems 维护）
         TopMenu.ItemClicked += OnTopMenuClicked;
@@ -369,6 +368,7 @@ public partial class MainWindow : Window
             case CoreWebView2ProcessFailedKind.BrowserProcessExited:
                 Dispatcher.Invoke(() =>
                 {
+                    _rendererReloadTried = false; // 整个浏览器进程将重建，复位渲染崩溃自动刷新的一次性标志
                     // R1：先收起 WebView2，覆盖层才可见
                     WebView.Visibility = Visibility.Collapsed;
                     ShowError("页面进程已退出", "浏览器内核异常退出，服务器可能仍在运行。", allowRetry: true);
@@ -529,9 +529,11 @@ public partial class MainWindow : Window
                 {
                     action();
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 窗口销毁/关闭期回调异常：忽略（不击穿全局异常兜底）
+                    // 关闭期回调异常属正常（不击穿全局异常兜底）；非关闭期记日志，防编程错误被静默吞掉
+                    if (!Dispatcher.HasShutdownStarted)
+                        AppendLog($"UI 派发回调异常: {ex.Message}");
                 }
             });
         }
@@ -585,6 +587,12 @@ public partial class MainWindow : Window
             if (!ok)
             {
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
+                return;
+            }
+            if (WebView.CoreWebView2 is null)
+            {
+                // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
+                ShowError("页面内核未就绪", "WebView2 未能初始化，请重启应用；若反复出现请检查 WebView2 Runtime。", allowRetry: false);
                 return;
             }
             WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
@@ -659,6 +667,12 @@ public partial class MainWindow : Window
             if (!ok)
             {
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
+                return;
+            }
+            if (WebView.CoreWebView2 is null)
+            {
+                // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
+                ShowError("页面内核未就绪", "WebView2 未能初始化，请重启应用；若反复出现请检查 WebView2 Runtime。", allowRetry: false);
                 return;
             }
             WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
@@ -813,9 +827,11 @@ public partial class MainWindow : Window
 
         // 走到这里 = 真退出（托盘"退出" / 关窗直退 / 设置关闭托盘化）：取消进行中的应用下载
         // （下载无副作用：只写 update 临时文件，取消后由下次启动清理兜底）
-        if (_appUpdating && _appDownloadCts is not null)
+        // 局部捕获防竞态：下载完成的 finally 可能并发将字段置 null
+        var downloadCts = _appDownloadCts;
+        if (_appUpdating && downloadCts is not null)
         {
-            _appDownloadCts.Cancel();
+            downloadCts.Cancel();
             AppendLog("应用更新下载已取消（应用退出）");
         }
     }
@@ -833,6 +849,7 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         HideCheckProgress(); // 主窗口关闭：进度窗一并关闭，防残留
+        ThemeManager.ThemeChanged -= OnThemeChangedApplyDwm; // 静态事件解除订阅，防窗口实例被挂住
         _server.Shutdown();
         _server.Dispose();
         _balance.Stop();

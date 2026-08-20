@@ -15,8 +15,8 @@ public sealed class BalanceMonitor : IDisposable
     /// <summary>轮询间隔（失败不加速，固定 60s）。</summary>
     private const int PollIntervalMs = 60_000;
 
-    /// <summary>手动刷新防抖窗口：距上次请求不足 2s 忽略。</summary>
-    private const long DebounceTicks = TimeSpan.TicksPerSecond * 2;
+    /// <summary>手动刷新防抖窗口（毫秒）：距上次请求不足 2s 忽略。</summary>
+    private const long DebounceMs = 2_000;
 
     /// <summary>HTTP 超时（10s）。</summary>
     private static readonly TimeSpan HttpTimeout = TimeSpan.FromSeconds(10);
@@ -28,7 +28,7 @@ public sealed class BalanceMonitor : IDisposable
     private bool _disposed;
     private int _started;
     private int _refreshing;
-    private long _lastRequestTicks;
+    private long _lastRequestMs;
     private string? _lastBalanceText;
 
     /// <summary>已停止标志（Stop/Dispose 后置真；在途请求完成回调时忽略）。
@@ -40,6 +40,10 @@ public sealed class BalanceMonitor : IDisposable
 
     /// <summary>余额数值变化回调（供告警等数值逻辑）：成功为金额，失败/清除为 null。</summary>
     public event Action<decimal?>? BalanceAmountChanged;
+
+    /// <summary>刷新失败但保留旧显示值（网络类失败 KeepOld 路径）时通知：参数为失败原因。
+    /// 供手动刷新的状态卡反馈；后台轮询的失败订阅方应静默（顶栏保留旧值不动）。</summary>
+    public event Action<string>? RefreshFailed;
 
     /// <summary>明细文本（总额/赠送/充值/更新时间），供悬停 ToolTip。</summary>
     public string? DetailText { get; private set; }
@@ -118,11 +122,12 @@ public sealed class BalanceMonitor : IDisposable
             return RefreshResult.Stopped;
 
         // 防抖：距上次请求不足 2s 忽略（CAS 抢占，并发调用仅一个进入）
-        var now = DateTime.UtcNow.Ticks;
-        var previous = Interlocked.Read(ref _lastRequestTicks);
-        if (now - previous < DebounceTicks)
+        // 单调时钟（TickCount64）：系统时间回拨（NTP 校时等）不影响防抖判定
+        var now = Environment.TickCount64;
+        var previous = Interlocked.Read(ref _lastRequestMs);
+        if (now - previous < DebounceMs)
             return RefreshResult.Debounced;
-        if (Interlocked.CompareExchange(ref _lastRequestTicks, now, previous) != previous)
+        if (Interlocked.CompareExchange(ref _lastRequestMs, now, previous) != previous)
             return RefreshResult.Debounced;
 
         // 防重入：已有在途请求则忽略（其结果仍会到来，非防抖）
@@ -163,11 +168,14 @@ public sealed class BalanceMonitor : IDisposable
     {
         // 每次刷新重选 provider（设置页切换来源后无需重启监控）；key 同样每次重取
         var provider = BalanceProviders.Current;
+        // 来源快照：请求在途期间用户在设置页切换来源时，旧来源的迟到响应不得覆盖新来源 UI
+        // （文本格式与色阶语义两套体系，串来源会显示错乱）
+        var sourceKimi = BalanceProviders.IsKimi;
         var key = provider.ResolveKey(out var keyError, out var source);
 
         if (string.IsNullOrEmpty(key))
         {
-            PublishFailure(keyError ?? "未配置 API Key", source);
+            PublishFailure(keyError ?? "未配置 API Key", source, sourceKimi);
             return;
         }
 
@@ -182,6 +190,7 @@ public sealed class BalanceMonitor : IDisposable
             Dispatch(() =>
             {
                 if (Volatile.Read(ref _stopped)) return;
+                if (BalanceProviders.IsKimi != sourceKimi) return; // 来源已切换：丢弃旧来源迟到响应
                 ActiveSource = source;
                 DetailText = outcome.Detail;
                 _lastBalanceText = outcome.BalanceText;
@@ -197,10 +206,16 @@ public sealed class BalanceMonitor : IDisposable
         Dispatch(() =>
         {
             if (Volatile.Read(ref _stopped)) return;
+            if (BalanceProviders.IsKimi != sourceKimi) return; // 来源已切换：丢弃旧来源迟到响应
             ActiveSource = source;
             LastError = outcome.Error;
             if (outcome.KeepOld && _lastBalanceText is not null)
-                return; // 保留上次显示值，仅更新错误原因
+            {
+                // 保留上次显示值，仅更新错误原因；通知刷新失败（手动刷新的状态卡靠它反馈，
+                // 否则用户点刷新遇网络错误时永远停在"正在刷新…"，且 pending 标志遗留到下次轮询误弹成功卡）
+                RefreshFailed?.Invoke(outcome.Error ?? "未知原因");
+                return;
+            }
             DetailText = null;
             _lastBalanceText = null;
             LastBalance = null;
@@ -210,11 +225,12 @@ public sealed class BalanceMonitor : IDisposable
     }
 
     /// <summary>发布失败结果（清空旧值并回调 null）。</summary>
-    private void PublishFailure(string error, string? source)
+    private void PublishFailure(string error, string? source, bool sourceKimi)
     {
         Dispatch(() =>
         {
             if (Volatile.Read(ref _stopped)) return;
+            if (BalanceProviders.IsKimi != sourceKimi) return; // 来源已切换：丢弃旧来源结果
             ActiveSource = source;
             DetailText = null;
             _lastBalanceText = null;

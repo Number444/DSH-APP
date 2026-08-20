@@ -235,7 +235,15 @@ public sealed class AppUpdater : IDisposable
     /// <returns>true = 下载并校验通过（新 exe 在 DownloadedNewExePath）；false = 失败/取消（LastError 有因）。</returns>
     public async Task<bool> DownloadAndVerifyAsync(Action<long, long>? progress, CancellationToken ct)
     {
-        await _runLock.WaitAsync();
+        try
+        {
+            await _runLock.WaitAsync(ct); // 传入取消令牌：等锁期间用户取消不卡死
+        }
+        catch (OperationCanceledException)
+        {
+            LastError = "下载已取消";
+            return false; // 调用方按 IsCancellationRequested 走取消分支
+        }
         try
         {
             if (_disposed) return false;
@@ -514,15 +522,16 @@ public sealed class AppUpdater : IDisposable
     }
 
     /// <summary>经显式代理 127.0.0.1:7890 发送（检查重试路径）。</summary>
-    private static async Task<HttpResponseMessage> SendViaProxyAsync(HttpRequestMessage req, CancellationToken ct)
+    private static Task<HttpResponseMessage> SendViaProxyAsync(HttpRequestMessage req, CancellationToken ct) =>
+        ProxyClient.Value.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+    /// <summary>代理请求专用客户端（静态复用）：曾用 using 包裹低频创建——ResponseHeadersRead 下
+    /// 调用方还在读响应流时客户端已被 Dispose，可能拆解活动连接导致代理路径解析失败。</summary>
+    private static readonly Lazy<HttpClient> ProxyClient = new(() => new HttpClient(new HttpClientHandler
     {
-        using var client = new HttpClient(new HttpClientHandler
-        {
-            Proxy = new WebProxy("127.0.0.1", 7890),
-            UseProxy = true,
-        }) { Timeout = Timeout.InfiniteTimeSpan };
-        return await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-    }
+        Proxy = new WebProxy("127.0.0.1", 7890),
+        UseProxy = true,
+    }) { Timeout = Timeout.InfiniteTimeSpan });
 
     /// <summary>127.0.0.1:7890 是否可连通（代理重试前置条件）。</summary>
     private static async Task<bool> IsProxyAliveAsync()

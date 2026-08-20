@@ -73,7 +73,7 @@ public partial class MainWindow
             if (GetMonitorInfo(monitor, ref mi))
             {
                 var rc = mi.rcWork; // 物理像素
-                if (GetDpiForMonitor(monitor, 0, out var dpiX, out _) == 0)
+                if (GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpiX, out _) == 0)
                     scale = dpiX / 96.0;
                 work = new Rect(rc.Left / scale, rc.Top / scale, (rc.Right - rc.Left) / scale, (rc.Bottom - rc.Top) / scale);
             }

@@ -280,12 +280,20 @@ public sealed class HarnessUpdater : IDisposable
             {
                 // 终止后进程可能尚未完全退出，忽略
             }
-            var lastLineTimedOut = await drain; // 被终止后管道关闭，读剩余缓冲
+            var lastLineTimedOut = await AwaitDrainBounded(drain); // 被终止后管道关闭，读剩余缓冲
             return new NpmRunResult(true, true, -1, lastLineTimedOut);
         }
 
-        var lastLine = await drain; // 进程已退出，排空剩余输出
+        var lastLine = await AwaitDrainBounded(drain); // 进程已退出，排空剩余输出
         return new NpmRunResult(true, false, SafeExitCode(proc), lastLine);
+    }
+
+    /// <summary>等待输出排空（有界 5s）：进程树被强杀后管道句柄可能被孤儿孙进程持有，
+    /// ReadLineAsync 永不返回的风险下兜底放弃（否则 _runLock 被永久占用，更新器死锁）。</summary>
+    private static async Task<string?> AwaitDrainBounded(Task<string?> drain)
+    {
+        var done = await Task.WhenAny(drain, Task.Delay(5000));
+        return done == drain ? drain.Result : null;
     }
 
     /// <summary>

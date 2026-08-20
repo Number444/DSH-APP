@@ -120,11 +120,27 @@ public static class FileLog
         {
             EnsureBom();
             var batch = new List<string>(64);
-            // drain 到空：执行期间的新条目也会被取走，不会遗留
-            while (Queue.TryDequeue(out var line))
-                batch.Add(line);
-            if (batch.Count > 0)
-                File.AppendAllLines(FilePath, batch, new UTF8Encoding(false));
+            while (true)
+            {
+                // drain 到空：执行期间的新条目也会被取走，不会遗留
+                while (Queue.TryDequeue(out var line))
+                    batch.Add(line);
+                if (batch.Count > 0)
+                {
+                    File.AppendAllLines(FilePath, batch, new UTF8Encoding(false));
+                    batch.Clear();
+                }
+                // 退出条件必须在锁内与置空原子完成：否则"判空后、退出前"新入队的条目
+                // 会滞留到下次 Append 才落盘（应用退出时丢最后几行日志）
+                lock (Sync)
+                {
+                    if (Queue.IsEmpty)
+                    {
+                        _flushTask = null;
+                        return;
+                    }
+                }
+            }
         }
         catch
         {
