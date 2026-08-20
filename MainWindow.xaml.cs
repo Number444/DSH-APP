@@ -261,6 +261,11 @@ public partial class MainWindow : Window
         // 页面权限请求：WebView2 无浏览器式询问 UI，未处理的请求一律静默拒绝——
         // 对本机 Harness 源放行通知权限（浏览器端通知插件可用），其余权限不触碰（默认拒绝）
         wv.PermissionRequested += OnPermissionRequested;
+        // 旧版本未处理权限事件时"拒绝"会被持久化进 profile，持久化记录会短路事件本身
+        // （handler 永远收不到请求、permission 恒为 denied）——启动时复位本机端口段的历史记录
+        _ = ResetStaleNotificationPermissionsAsync(wv);
+        // 页面 → 壳通知桥：浏览器端插件经 chrome.webview.postMessage 上报，壳弹系统样式 toast
+        wv.WebMessageReceived += OnWebMessageReceived;
 
         wv.NavigationCompleted += OnNavigationCompleted;
         wv.ProcessFailed += OnProcessFailed;
@@ -298,6 +303,63 @@ public partial class MainWindow : Window
         if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
         if (uri.IsLoopback && uri.Port == _server.Port)
             e.State = CoreWebView2PermissionState.Allow;
+    }
+
+    /// <summary>
+    /// 复位历史遗留的通知权限记录：旧版本未处理 PermissionRequested 时，WebView2 会把"拒绝"
+    /// 持久化进 profile，而持久化记录会短路权限请求事件（handler 收不到、permission 恒为 denied）。
+    /// 启动时把本机 Harness 探测端口段（3080~3090，同 ServerController 扫描范围）loopback 源的
+    /// 通知权限复位为 Default（= 擦除持久化记录），让 OnPermissionRequested 重新接管。
+    /// 尽力而为（异步不等待），失败仅记日志。
+    /// </summary>
+    private async Task ResetStaleNotificationPermissionsAsync(CoreWebView2 wv)
+    {
+        try
+        {
+            var settings = await wv.Profile.GetNonDefaultPermissionSettingsAsync();
+            foreach (var s in settings)
+            {
+                if (s.PermissionKind != CoreWebView2PermissionKind.Notifications) continue;
+                if (!Uri.TryCreate(s.PermissionOrigin, UriKind.Absolute, out var uri)) continue;
+                if (!uri.IsLoopback || uri.Port is < 3080 or > 3090) continue;
+                await wv.Profile.SetPermissionStateAsync(
+                    CoreWebView2PermissionKind.Notifications, s.PermissionOrigin,
+                    CoreWebView2PermissionState.Default);
+                AppendLog($"已复位历史通知权限记录：{s.PermissionOrigin}");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"复位历史通知权限记录失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 页面 → 壳消息桥：浏览器端插件经 chrome.webview.postMessage 上报通知请求，
+    /// 壳用托盘气球弹系统 toast（WebView2 自绘通知非 Win11 样式；气球通道由系统渲染且不依赖页面通知权限）。
+    /// 仅接受本机 Harness 源（loopback + 当前服务端口）的消息；格式 {type:"dsh-notify", title, body}。
+    /// </summary>
+    private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            if (!Uri.TryCreate(e.Source, UriKind.Absolute, out var src)
+                || !src.IsLoopback || src.Port != _server.Port)
+                return;
+            using var doc = JsonDocument.Parse(e.WebMessageAsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return;
+            if (!root.TryGetProperty("type", out var type) || type.GetString() != "dsh-notify") return;
+            static string Clip(string? s, int max) => s is null ? "" : s.Length <= max ? s : s[..max];
+            var title = Clip(root.TryGetProperty("title", out var t) ? t.GetString() : null, 80);
+            var body = Clip(root.TryGetProperty("body", out var b) ? b.GetString() : null, 200);
+            if (title.Length == 0 && body.Length == 0) return;
+            TrayIcon.ShowBalloonTip(title, body, Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"页面通知桥处理失败: {ex.Message}");
+        }
     }
 
     /// <summary>应用设置中的界面缩放（100/125/150% → ZoomFactor；初始化与设置窗关闭后各调一次）。</summary>

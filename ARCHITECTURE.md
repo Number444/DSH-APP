@@ -13,7 +13,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 4. 提供启动状态、错误提示与断连检测
 5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚,确认弹窗展示 Release 说明)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)、设置页维护入口(打开数据目录、页面缓存清理)
 
-壳与 Harness 的唯一接触面是 `http://127.0.0.1:3080`(HTTP 边界,零侵入)。
+壳与 Harness 的接触面是 `http://127.0.0.1:3080`(HTTP 边界,零侵入)，外加一条窄桥：页面 → 壳的 `WebMessageReceived` 通知上报（仅收 loopback + 当前服务端口源的 `{type:"dsh-notify"}` 消息，壳弹系统样式 toast；单向、只读消息体，无页面能力暴露）。
 这也是它对"已安装 dsh 的任意电脑"零适配可用的原因。
 
 ```
@@ -87,7 +87,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
            → InitWebViewAsync:CoreWebView2Environment.CreateAsync(null, %LOCALAPPDATA%\dsh-app\WebView2)  ← 与 Edge 隔离
              → DefaultBackgroundColor=#0D1117(消白闪) → EnsureCoreWebView2Async()
              → Profile.PreferredColorScheme=Dark(页面滚动条/表单深色)
-             → 订阅 NavigationCompleted / ProcessFailed / PermissionRequested（仅对本机 Harness 源放行通知权限——WebView2 无询问 UI、未处理即静默拒绝，浏览器端通知插件依赖此放行；其余权限保持默认拒绝，授权持久化于壳 profile）
+             → 订阅 NavigationCompleted / ProcessFailed / PermissionRequested（仅对本机 Harness 源放行通知权限——WebView2 无询问 UI、未处理即静默拒绝，浏览器端通知插件依赖此放行；其余权限保持默认拒绝，授权持久化于壳 profile）；启动时经 `GetNonDefaultPermissionSettingsAsync` 复位 3080~3090 loopback 源的历史通知权限记录（旧版本持久化的"拒绝"会短路 PermissionRequested 事件，不复位则 handler 永远收不到请求）
            → EnsureServerAsync:
              → DetectRunningServerAsync(): 并发 HTTP GET 3080~3090(Task.WhenAll,最坏 ~1s,取存活最小端口)
                  ├─ 命中 → 记录监听 PID(netstat)+ 身份验证(CIM 命令行含 dsh/bin.js 特征)
