@@ -9,7 +9,8 @@
 - **协议纠正**：`/api/events.host` 在实际部署的 dsh 版本上**只收 WebSocket upgrade**（普通 GET 返回 426，官方 README 明确无 SSE 回退——SSE 编解码只服务进程内同构载体）。实现改为 `ClientWebSocket` 直连，方向设计（边沿表/退避/静音/开关）不变。帧格式经实抓验证：`{type:"server-request", rpcId, method, payload}`，payload 即 host 帧
 - 已交付：`Server/CompletionNotifier.cs` + `MainWindow.Notify.cs` + 设置开关（默认开）+ 气泡点击按种类路由；审查后修复端口跟随（重启换端口自动重连）与 Close 帧握手
 - 审查存疑项处置：子代理帧时序（added 先于 status）经实抓证伪不误报；边沿判定"连接前就在跑的会话只见收尾帧也通知"经 Four 实测确认
-- **未完成**：插件退役清单（下方 §插件退役清单）尚未执行——等 Four 一声令下，删插件 + 桥接死代码 + cordis.patch.yml 条目
+- **未完成**：~~插件退役清单~~ **已执行完毕（同日）**：壳内 `OnWebMessageReceived` 桥 + `OnPermissionRequested` 权限放行 + `ResetStaleNotificationPermissionsAsync` 自愈已删（无消费者）。本文件使命完结，留档备查
+- **退役踩坑记录（挂载链真相）**：bundle 挂载链 = **profile `package.json` 的 `dsh.profile.bundles` + `dependencies` 声明** + `node_modules` 包本体，三处一体。只删包目录不删声明 → dsh 启动解析不到 bundle 直接 exit 1（本次实测踩中，Four 手动删声明 + 重装依赖修复）。**今后退役任何 bundle：声明与包本体必须同删**
 
 ## 决策（Four 已确认，直接执行，不必再问方向）
 
