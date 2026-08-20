@@ -114,6 +114,14 @@ public partial class MainWindow
                 _trayExitRequested = true;
                 Close();
                 break;
+            case "exitapp":
+                // 退出APP但保留后台 dsh 服务：与 "exit" 同为真退出（跳过托盘化），
+                // 差别在 OnClosed 按 _exitKeepServer 跳过 _server.Shutdown()，服务成孤儿继续运行
+                CloseAllMenus();
+                _trayExitRequested = true;
+                _exitKeepServer = true;
+                Close();
+                break;
         }
     }
 
@@ -350,7 +358,7 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>托盘菜单项：打开主窗口 / 检查 Harness 更新 / 检查应用更新 / 诊断信息 / 设置 / 退出（状态与顶栏同步）。</summary>
+    /// <summary>托盘菜单项：打开主窗口 / 检查 Harness 更新 / 检查应用更新 / 诊断信息 / 设置 / 退出APP（保留服务） / 退出（状态与顶栏同步）。</summary>
     private void UpdateTrayMenuItems()
     {
         var items = new List<AppMenuItem>
@@ -360,6 +368,7 @@ public partial class MainWindow
         AppendUpdateItems(items);
         items.Add(new AppMenuItem("diagnostics", "诊断信息"));
         items.Add(new AppMenuItem("settings", "设置"));
+        items.Add(new AppMenuItem("exitapp", "退出APP（保留服务）"));
         items.Add(new AppMenuItem("exit", "退出"));
         TrayMenu.ItemsSource = items;
     }
@@ -412,7 +421,9 @@ public partial class MainWindow
             new("diagnostics", "诊断信息"),
         };
         AppendUpdateItems(items);
-        // 顶栏"退出"（与托盘一致）：退出整个 harness（壳 + dsh 服务）
+        // 顶栏"退出APP（保留服务）"：只关壳，后台 dsh 服务继续运行（下次启动重新接管）；
+        // "退出"（与托盘一致）：退出整个 harness（壳 + dsh 服务）
+        items.Add(new AppMenuItem("exitapp", "退出APP（保留服务）"));
         items.Add(new AppMenuItem("exit", "退出"));
         TopMenu.ItemsSource = items;
         UpdateTrayMenuItems(); // 托盘更新项与顶栏联动

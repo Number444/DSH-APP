@@ -56,6 +56,9 @@ public partial class MainWindow : Window
     private Views.UpdateProgressWindow? _checkProgress;
     /// <summary>托盘"退出"请求：跳过最小化到托盘拦截，真正退出。</summary>
     private bool _trayExitRequested;
+    /// <summary>菜单"退出APP（保留服务）"：退出壳但不停止后台 dsh 服务（OnClosed 跳过 Shutdown，
+    /// 仅 Dispose 释放进程句柄；服务成孤儿，下次启动按既有探测逻辑重新接管）。</summary>
+    private bool _exitKeepServer;
     /// <summary>首次隐藏到托盘时是否已提示。</summary>
     private bool _trayHintShown;
     /// <summary>余额是否高于告警阈值（初始视为高：首次刷新低于阈值即告警；恢复后复位）。</summary>
@@ -850,7 +853,17 @@ public partial class MainWindow : Window
     {
         HideCheckProgress(); // 主窗口关闭：进度窗一并关闭，防残留
         ThemeManager.ThemeChanged -= OnThemeChangedApplyDwm; // 静态事件解除订阅，防窗口实例被挂住
-        _server.Shutdown();
+        // "退出APP（保留服务）"：跳过 Shutdown，服务成孤儿继续跑（下次启动探测接管）；
+        // 其余退出路径（托盘"退出"/关窗直退/强制退出/自更新重启）照旧停服
+        if (_exitKeepServer)
+        {
+            AppendLog("退出APP：保留后台 dsh 服务运行");
+            _exitKeepServer = false; // 一次性语义：防御性复位（窗口关闭即销毁，此处仅为未来复用不留残留）
+        }
+        else
+        {
+            _server.Shutdown();
+        }
         _server.Dispose();
         _balance.Stop();
         _balance.Dispose();

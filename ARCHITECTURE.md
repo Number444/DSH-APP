@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-19 · 版本 v1.4.0+未发布 · 本次更新:外链抛系统浏览器（NewWindowRequested）、托盘化挂起页面渲染（TrySuspendAsync）、各窗统一 Esc 关闭、菜单键盘可达（Esc/↑↓/焦点入 Popup）、共享焦点框（FocusRingStyle）、设置窗 620px 滚动上限、关于窗品牌图标内嵌化、动画按渲染 Tier 降级、导航错误文案中文化（WebErrorText）、界面缩放设置（ZoomFactor）、托盘悬停带服务状态、菜单/状态卡轻阴影（阴影与动画模糊分层）
+> 更新时间:2026-08-20 · 版本 v1.4.0+未发布 · 本次更新:菜单/弹窗动画体系（PopupAnimator：菜单默认档 / 状态卡轻量档 / 启动页入场编排）、像素点阵进度条（MainWindow.Progress）、Kimi 双窗口配额 + 刷新失败闭环（RefreshFailed）、整体审查加固（竞态/解析/防抖/资源十余处）、菜单新增「退出APP（保留服务）」（退壳不停服）
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -9,7 +9,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 
 1. 把 `dsh web` 服务器拉起来(若未运行)
 2. 用 WebView2 在独立窗口里渲染 Harness UI
-3. 管理服务器生命周期(关窗默认最小化到托盘,服务继续;托盘"退出"才停服,仅停自己拉起的 + 接管验证过的)
+3. 管理服务器生命周期(关窗默认最小化到托盘,服务继续;菜单「退出APP（保留服务）」只退壳、服务成孤儿待下次启动接管;"退出"才停服,仅停自己拉起的 + 接管验证过的)
 4. 提供启动状态、错误提示与断连检测
 5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚,确认弹窗展示 Release 说明)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)、设置页维护入口(打开数据目录、页面缓存清理)
 
@@ -46,17 +46,18 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化、`App.AppVersion`（壳版本）、启动清理 update 下载残留、**日志截断（`FileLog.TrimIfOversize`，单实例判定后执行）**、**缓存清理执行（`WebView2CacheCleaner.RunPendingCleanup`，WebView2 初始化前）** |
-| 窗口层 | `MainWindow.xaml(.cs)` + **5 个 partial**（v1.4.0 拆分：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于）、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
+| 窗口层 | `MainWindow.xaml(.cs)` + **6 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出APP（保留服务）/退出）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
 | 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较（共用 `Helpers/SemVer.cs`），超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
 | 自更新层 | `Server/AppUpdater.cs` | 壳自身（dsh-app.exe）更新:GitHub Releases 检查（tag/资产校验 fail-closed）、**Release 说明存取（`LatestReleaseNotes`，截断 1000 字符供确认弹窗展示）**、流式下载 + 同遍 SHA256、磁盘预检、进度节流、更新器脚本生成（内嵌模板提取）;网络策略直连优先 + 7890 代理兜底重试 |
 | 诊断层 | `Helpers/Diagnostics.cs` + `Views/DiagnosticsWindow` | 环境与运行状态并行采集（node 版本/服务状态/代理/GitHub 连通性/设置项）,敏感边界:绝不含凭据;纯文本一键复制 |
 | 版本层 | `Helpers/SemVer.cs` | semver 比较（提取自 HarnessUpdater,Harness 与应用自更新共用;pre-release 规则,不误报） |
-| 余额层 | `Server/BalanceMonitor.cs` + `Server/BalanceProviders.cs` + `Helpers/CredentialsReader.cs` | 余额/额度轮询（60s）、**双来源 provider（DeepSeek ¥ 余额 / Kimi for Coding 配额，设置页切换）**、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
+| 余额层 | `Server/BalanceMonitor.cs` + `Server/BalanceProviders.cs` + `Helpers/CredentialsReader.cs` | 余额/额度轮询（60s）、**双来源 provider（DeepSeek ¥ 余额 / Kimi for Coding 配额，设置页切换）**、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、**失败闭环（来源快照防热切换竞态 + `RefreshFailed` 事件 + 单调时钟防抖）**、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
 | 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key），settings.json 持久化（Lazy + 原子替换） |
 | 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听；`ButtonBlueBrush`（主操作按钮，对比度达标） |
 | 安全层 | `Helpers/DpapiHelper.cs` | DPAPI 加解密（CurrentUser），密钥类字段存储 |
 | 控件层 | `Helpers/CustomScrollBar.cs` | 自定义迷你滚动条(四档过渡,自 Toolbox 移植) |
+| 动画层 | `Helpers/PopupAnimator.cs` | Popup 打开/关闭动画公共实现：打开=锚点方向抛出+BackEase 回弹+放大+模糊渐清，关闭=收拢+模糊+渐隐；**`BeginAnimation` 直调**（Storyboard 对 Transform/Effect 目标静默丢弃）；Tier<2 禁逐帧模糊；菜单默认档 / 状态卡轻量档（320ms/220ms 可感知量级）/ 启动页入场档（1.2s + 250ms 压后编排） |
 | 视图层 | `Views/SettingsWindow` / `Views/AboutWindow` / `Views/ConfirmDialog` | 设置（主题/更新/常驻/**界面缩放**/数据目录与缓存清理/余额，超高 620px 滚动兜底）、关于（品牌图标内嵌 PNG）、通用自绘弹窗（单/双按钮 + glyph + 破坏性红色模式 + 长文本 320px 滚动区）；**各窗统一 Esc 关闭** |
 | 维护层 | `Helpers/WebView2CacheCleaner.cs` | WebView2 页面缓存清理：设置页写 `clear-cache.flag` 标记，下次启动在 WebView2 初始化前清 Cache/Code Cache/GPUCache（不动 Cookies/Local Storage，登录态保留） |
 | 资源层 | `Resources/Theme.xaml` | 按钮/滚动条等公用样式(全部 DynamicResource)、**`FocusRingStyle` 共享焦点框**（键盘焦点可见） |
@@ -131,6 +132,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 导航失败 | `NavigationCompleted(!IsSuccess)` → 错误卡片 + 重试(重试先 Shutdown 再重新 Ensure)；错误码经 `WebErrorText` 中文化 |
 | 页面外链（target=_blank） | `NewWindowRequested` 接管：Handled=true，仅 http/https 抛系统浏览器，壳内不开第二窗口 |
 | 最小化到托盘 | `Hide()` 后 `TrySuspendAsync` 挂起渲染进程（页面活动可拒绝，尽力而为）；恢复窗口 `Resume()`；真退出无需唤醒 |
+| 菜单「退出APP（保留服务）」 | `_exitKeepServer`：真退出（跳过托盘化拦截）但 `OnClosed` 跳过 `Shutdown()`、仅 `Dispose()` 释放进程句柄；dsh 服务成孤儿继续运行，下次启动探测接管（「退出」行为不变：停服） |
 | 更新中关窗 | `OnClosing` 拦截 + ConfirmDialog"中断并关闭/继续更新"；确认后 `AbortRunningNpm` 终止安装并关闭（半安装比跑完更危险）；`Dispose` 不杀进程 |
 | 更新失败 | 先 `EnsureServerAsync()` 恢复旧服务 → 错误卡 + `LastError` 原因 + 手动安装指引 |
 | 应用自更新下载中关窗 | 托盘化（Hide）不取消下载（后台继续，完成弹气泡 + 待安装，恢复窗口确认）；真退出（托盘"退出"/关窗直退）取消下载并清理；`_quitForAppUpdate` 放行更新重启的真退出 |
@@ -163,6 +165,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 19. **MainWindow 拆分 partial**——2001 行单文件拆为 6 个 partial（纯移动零逻辑变更），职责：主体（启动/覆盖层/心跳/生命周期）+ Tray / Menus / Updates / Balance / Native
 20. **托盘化渲染挂起**——隐藏到托盘后 `CoreWebView2.TrySuspendAsync()` 挂起渲染进程（页面活动可拒绝，尽力而为只记日志），恢复窗口 `Resume()`；长期驻留不空转，省电省 CPU
 21. **键盘可达性成套**——各窗统一 Esc 关闭；菜单打开焦点入 Popup 首项（↑↓ 方向导航天然支持、禁用项自动跳过，Esc 双路：面板 KeyDown→DismissRequested + 窗口 PreviewKeyDown 兜底）；共享 `FocusRingStyle` 焦点框替换全量 `{x:Null}`
+22. **Popup 动画公共化（PopupAnimator）**——菜单/状态卡/启动页共用一套打开/关闭动画（打开=抛出+BackEase 回弹+缩放+模糊渐清，关闭=收拢+模糊+渐隐）；必须 `Animatable.BeginAnimation` 直调（`Storyboard.SetTarget` 对 Transform/Effect 等 Freezable 目标静默丢弃，曾致缩放/位移/模糊定格在起始态）；`BeginAnimation` 同属性替换天然取消旧动画（被替换时钟不触发 Completed，孤儿动画回调 `ReferenceEquals` 防误清）；渲染 Tier<2 禁逐帧模糊；尊重系统"菜单动画"开关；短生命周期提示用轻量档（320ms/220ms——200ms/10% 量级肉眼不可感知，实测调参结论）
+23. **像素点阵进度条（MainWindow.Progress）**——90 列×2 行像素屏（3px 格+1px 缝，熄灭态 12% 透明度保持点阵质感）+ 波式级联点亮（120ms 淡入 + 8ms/列）+ 亮白前沿列 + 彗尾光柱群按宽度比例锚定已点亮区域（固定种子，每次启动布局一致）；启动覆盖层与下载进度窗共用，真实步骤/下载进度驱动
+24. **余额刷新失败闭环**——来源快照（刷新期间切换 Kimi/DeepSeek 来源，迟到的旧来源响应直接丢弃）；KeepOld 保留旧值时发 `RefreshFailed`（手动刷新状态卡红字"保留上次值"，防"正在刷新…"卡死与后续轮询误弹"已更新"）；防抖改 `Environment.TickCount64` 单调时钟（系统时间回拨不再卡死刷新）
 
 ## 6. 可移植性设计
 
