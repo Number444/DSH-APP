@@ -62,14 +62,16 @@ public partial class MainWindow
         _trayBalanceText = text;
         UpdateTrayToolTip();
 
+        var isKimi = BalanceProviders.IsKimi;
         if (text is null)
         {
             TitleBalanceText.Text = "—";
             // 失败/无值：显式弱色（SetResourceReference = DynamicResource 语义，主题切换即时跟随）
             TitleBalanceText.SetResourceReference(TextBlock.ForegroundProperty, "TextWeakBrush");
+            var label = isKimi ? "额度" : "余额";
             TitleBalance.ToolTip = _balance.LastError is null
-                ? "余额获取失败（点击重试）"
-                : $"余额获取失败：{_balance.LastError}（点击重试）";
+                ? $"{label}获取失败（点击重试）"
+                : $"{label}获取失败：{_balance.LastError}（点击重试）";
             if (_userRefreshPending)
             {
                 _userRefreshPending = false;
@@ -79,21 +81,28 @@ public partial class MainWindow
         }
         else
         {
-            TitleBalanceText.Text = $"¥ {text}";
-            TitleBalance.ToolTip = _balance.DetailText + "\n左键菜单：刷新 / 充值";
-            // 余额状态色（规范见 docs/UI-GUIDELINES.md §4.1）：常驻公共蓝；<¥5 告警黄；<¥2 危险红。
+            // DeepSeek：金额文本（"23.50"）加 ¥ 前缀；Kimi：完整双窗口已用百分比文本（"5h: 13% / 7d: 56%"）
+            TitleBalanceText.Text = isKimi ? text : $"¥ {text}";
+            TitleBalance.ToolTip = _balance.DetailText +
+                (isKimi ? "\n左键菜单：刷新 / 用量页" : "\n左键菜单：刷新 / 充值");
+            // 状态色（规范见 docs/UI-GUIDELINES.md §4.1）：
+            // DeepSeek 按金额 ¥5/¥2 分级（越低越紧张）；Kimi 按两窗口较高的已用百分比 80%/90% 分级（越高越紧张）。
             // SetResourceReference = DynamicResource：主题切换即时跟随（R8），不残留旧主题色
             if (_balance.LastBalance is decimal amount)
             {
                 TitleBalanceText.SetResourceReference(TextBlock.ForegroundProperty,
-                    amount < BalanceDangerThreshold ? "AccentRedBrush"
-                    : amount < BalanceWarnThreshold ? "BalanceAlertBrush"
-                    : "AccentBlueBrush");
+                    isKimi
+                        ? (amount >= KimiDangerPercent ? "AccentRedBrush"
+                            : amount >= KimiWarnPercent ? "BalanceAlertBrush"
+                            : "AccentBlueBrush")
+                        : (amount < BalanceDangerThreshold ? "AccentRedBrush"
+                            : amount < BalanceWarnThreshold ? "BalanceAlertBrush"
+                            : "AccentBlueBrush"));
             }
             if (_userRefreshPending)
             {
                 _userRefreshPending = false;
-                ShowBalanceStatus($"✓ 余额已更新：¥ {text}",
+                ShowBalanceStatus(isKimi ? $"✓ 额度已更新：{text}" : $"✓ 余额已更新：¥ {text}",
                     (Brush)FindResource("AccentGreenBrush"));
             }
         }
@@ -105,7 +114,8 @@ public partial class MainWindow
     /// </summary>
     private void OnBalanceAmountChanged(decimal? amount)
     {
-        if (amount is null || !AppSettings.Current.BalanceAlertEnabled)
+        // 低额告警仅 DeepSeek ¥ 余额生效（Kimi 是周期配额，跌破阈值提醒意义不大）
+        if (amount is null || !AppSettings.Current.BalanceAlertEnabled || BalanceProviders.IsKimi)
             return;
 
         var threshold = AppSettings.Current.BalanceAlertThreshold;
@@ -140,8 +150,20 @@ public partial class MainWindow
     {
         var text = $"DeepSeek Harness · {_serviceStateText}";
         if (_trayBalanceText is not null)
-            text += $" — 余额 ¥{_trayBalanceText}";
+            text += BalanceProviders.IsKimi ? $" — Kimi {_trayBalanceText}" : $" — 余额 ¥{_trayBalanceText}";
         TrayIcon.ToolTipText = text;
+    }
+
+    /// <summary>按当前显示来源重建余额菜单项文案（DeepSeek：刷新余额/打开充值页；Kimi：刷新额度/打开 Kimi 用量页）。
+    /// 在构造与每次打开余额菜单前调用（来源可能在设置页刚切换）。</summary>
+    private void RefreshBalanceMenuItems()
+    {
+        var isKimi = BalanceProviders.IsKimi;
+        BalanceMenu.ItemsSource = new[]
+        {
+            new AppMenuItem("refresh", isKimi ? "刷新额度" : "刷新余额"),
+            new AppMenuItem("topup", isKimi ? "打开 Kimi 用量页" : "打开充值页"),
+        };
     }
 
     /// <summary>右键余额交互已删除（v1.2.1）：左键菜单内含刷新/充值；此注释占位防误加回。</summary>
@@ -152,10 +174,18 @@ public partial class MainWindow
         var seq = ++_statusSeq;
         BalanceStatusText.Text = text;
         BalanceStatusText.Foreground = brush ?? (Brush)FindResource("TextSecondaryBrush");
-        // 与余额菜单同锚点：先关菜单防叠显；水平偏移复位（上次钳位可能留负值）
-        BalanceMenuPopup.IsOpen = false;
+        // 与余额菜单同锚点，防叠显：菜单仍打开且未在收拢时瞬关；水平偏移复位（上次钳位可能留负值）。
+        // 收拢动画在跑（本次点击正来自"刷新"菜单项）时不动它——瞬关会杀掉退出动画
+        if (BalanceMenuPopup.IsOpen && !PopupAnimator.IsClosing(BalanceMenu.RootCard))
+            BalanceMenuPopup.IsOpen = false;
         BalanceStatusPopup.HorizontalOffset = 0;
+        // 收拢动画在飞时收到新内容（点外部淡出中立刻又刷新）：取消收拢并播回打开动画。
+        // PlayOpen 的 BeginAnimation 替换语义使旧收拢时钟静默作废——其完成回调不会触发，不会误关新卡
+        var closingChild = BalanceStatusPopup.IsOpen ? BalanceStatusPopup.Child as FrameworkElement : null;
+        var reopenDuringClose = closingChild is not null && PopupAnimator.IsClosing(closingChild);
         BalanceStatusPopup.IsOpen = true;
+        if (reopenDuringClose)
+            PopupAnimator.PlayOpen(closingChild!, options: PopupAnimator.LightOpen);
         // 水平钳位：状态卡右缘超工作区则左移（余额按钮右侧紧邻系统按钮区，文本可能溢出）
         if (BalanceStatusPopup.Child is FrameworkElement child)
         {
@@ -174,13 +204,20 @@ public partial class MainWindow
         }
         await Task.Delay(stayMs);
         if (seq == _statusSeq)
-        {
-            // 自动消失播轻量淡出（Popup 关闭即销毁，必须先动画后关）
-            if (BalanceStatusPopup.Child is FrameworkElement fadeChild)
-                PopupAnimator.PlayClose(fadeChild, () => BalanceStatusPopup.IsOpen = false, PopupAnimator.LightClose);
-            else
-                BalanceStatusPopup.IsOpen = false;
-        }
+            DismissBalanceStatus();
+    }
+
+    /// <summary>动画关闭余额状态卡（自动消失与外部点击钩子共用入口）：
+    /// 递增序号使待决的自动关闭失效；PlayClose 幂等（收拢在跑时重入直接返回，由原回调收尾）。</summary>
+    private void DismissBalanceStatus()
+    {
+        if (!BalanceStatusPopup.IsOpen) return;
+        _statusSeq++;
+        // 淡出动画完成后再置 IsOpen=false（Popup 关闭即销毁视觉树，顺序不可反）
+        if (BalanceStatusPopup.Child is FrameworkElement child)
+            PopupAnimator.PlayClose(child, () => BalanceStatusPopup.IsOpen = false, PopupAnimator.LightClose);
+        else
+            BalanceStatusPopup.IsOpen = false;
     }
 
     /// <summary>按下反馈：余额按钮内容轻微缩小（配合 Click 的弹性弹回，构成点击动效）。</summary>

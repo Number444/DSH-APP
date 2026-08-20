@@ -49,6 +49,12 @@ public sealed class AppSettings
     /// <summary>手动兜底模式的 API Key（DPAPI 密文 Base64，绝不明文落盘）。</summary>
     public string? EncryptedApiKey { get; set; }
 
+    /// <summary>顶栏余额显示来源："deepseek"（默认，¥ 余额）| "kimi"（Kimi for Coding 配额百分比）。</summary>
+    public string BalanceSource { get; set; } = "deepseek";
+
+    /// <summary>Kimi 手动兜底模式的 API Key（DPAPI 密文 Base64，绝不明文落盘）。</summary>
+    public string? EncryptedKimiApiKey { get; set; }
+
     public static AppSettings Load()
     {
         try

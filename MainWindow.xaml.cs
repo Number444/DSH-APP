@@ -64,6 +64,10 @@ public partial class MainWindow : Window
     private const decimal BalanceWarnThreshold = 5m;
     /// <summary>余额状态色阈值（固定）：低于此值变红（危险）。</summary>
     private const decimal BalanceDangerThreshold = 2m;
+    /// <summary>Kimi 额度状态色阈值（已用百分比，取 5h/7d 两窗口较高值）：达到此值变黄（告警）。</summary>
+    private const decimal KimiWarnPercent = 80m;
+    /// <summary>Kimi 额度状态色阈值（已用百分比）：达到此值变红（危险）。</summary>
+    private const decimal KimiDangerPercent = 90m;
     /// <summary>用户点击余额触发的刷新待结果（仅此场景弹状态窗；后台轮询不弹）。</summary>
     private bool _userRefreshPending;
     /// <summary>状态窗序号：防快速连续点击时旧延迟关闭误关新弹窗。</summary>
@@ -113,13 +117,9 @@ public partial class MainWindow : Window
         TopMenu.ItemClicked += OnTopMenuClicked;
         UpdateMenuItems();
 
-        // 余额左键菜单（刷新 / 充值；右键交互已删除）
+        // 余额左键菜单（刷新 / 充值或用量页；文案按显示来源动态重建，见 RefreshBalanceMenuItems）
         BalanceMenu.ItemClicked += OnTopMenuClicked;
-        BalanceMenu.ItemsSource = new[]
-        {
-            new AppMenuItem("refresh", "刷新余额"),
-            new AppMenuItem("topup", "打开充值页"),
-        };
+        RefreshBalanceMenuItems();
 
         // 托盘菜单：与 APP 内菜单同一公共控件（Popup 定位，弃用 ContextMenu）；内容由 UpdateMenuItems 联动
         TrayMenu.ItemClicked += OnTopMenuClicked;
@@ -135,16 +135,19 @@ public partial class MainWindow : Window
         // 打开动画经 Opened 统一驱动：顶栏/余额从按钮上方抛出（(0,-24)），托盘按光标方向
         MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -24)); TopMenu.FocusFirstItem(); };
         MenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); BalanceMenu.PlayOpenAnimation(new Point(0, -24)); BalanceMenu.FocusFirstItem(); };
+        BalanceMenuPopup.Opened += (_, _) => { InstallDismissHook(); RefreshBalanceMenuItems(); BalanceMenu.PlayOpenAnimation(new Point(0, -24)); BalanceMenu.FocusFirstItem(); };
         BalanceMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
         TrayMenuPopup.Opened += (_, _) => { InstallDismissHook(); TrayMenu.PlayOpenAnimation(_trayFlyFrom); TrayMenu.FocusFirstItem(); };
         TrayMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
-        // 余额状态卡：轻量档打开动画（淡入 + 轻放大，无位移无弹性）
+        // 余额状态卡：轻量档打开动画（淡入 + 轻放大，无位移无弹性）；StaysOpen=True，
+        // 点击外部经全局钩子动画淡出（与菜单同一钩子），关闭后按空闲卸载钩子
         BalanceStatusPopup.Opened += (_, _) =>
         {
+            InstallDismissHook();
             if (BalanceStatusPopup.Child is FrameworkElement child)
                 PopupAnimator.PlayOpen(child, options: PopupAnimator.LightOpen);
         };
+        BalanceStatusPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
 
         // 系统托盘：图标/事件（失败静默，不影响主流程）
         InitTray();

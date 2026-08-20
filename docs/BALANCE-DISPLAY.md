@@ -244,3 +244,14 @@ settings.json（`%LOCALAPPDATA%\dsh-app\`）扩展：
 - **设置页**：余额区新增"余额低于阈值时提醒"开关（默认开）+ 阈值输入（默认 ¥5，失焦校验保存，非法回显当前值）。
 - **设置持久化**：`AppSettings` 新增 `MinimizeToTrayOnClose`（默认 true）、`BalanceAlertEnabled`（默认 true）、`BalanceAlertThreshold`（默认 5m）。
 - 托盘悬停同步实时余额（`TaskbarIcon.ToolTipText`：`DeepSeek Harness — 余额 ¥xx.xx`）。
+
+## 实现记录（未发布 · 2026-08-20 Kimi 额度来源）
+
+- **显示来源切换**：设置页余额区新增「显示来源」胶囊单选（DeepSeek 余额 / Kimi 额度），持久化 `AppSettings.BalanceSource`（"deepseek" 默认 | "kimi"）；监控器每次刷新按设置重选 provider，切换后关闭设置窗即生效，无需重启。
+- **Provider 分层**：`Server/BalanceProviders.cs` 新增——`FetchOutcome`/`IBalanceProvider` 上提共享；`BalanceProviderBase` 归一 HTTP 公共段（Bearer、401/403=Key 无效、其余非 2xx=网络错误保留旧值）；`DeepSeekBalanceProvider` 原逻辑原样搬入；`BalanceMonitor` 只保留轮询/防抖/派发外壳。
+- **KimiUsageProvider**：`GET https://api.kimi.com/coding/v1/usages`；配额制（次数）非 ¥ 余额——解析 `limits[]` 中 300 分钟窗口（5h）+ 根 `usage`（周级）；顶栏显示 `5h: 13% / 7d: 56%`（**已用**百分比，与 Kimi 控制台语义一致；缺窗口时只显示有的一侧）；ToolTip 明细含两窗口已用次数与重置时间（本地时区）；状态色数值 = 两窗口较高已用百分比（80%/90% 黄红分级，常量 `KimiWarnPercent`/`KimiDangerPercent`）。
+- **Key 来源链**：与 DeepSeek 同构——凭据文件 `KIMI_CODING_API_KEY`（同一授权，弹窗文案已更新）→ 环境变量 → 手动 DPAPI（新字段 `AppSettings.EncryptedKimiApiKey`，设置页独立 PasswordBox）。
+- **UI 分支**：Kimi 模式下——余额菜单文案「刷新额度 / 打开 Kimi 用量页」（`https://www.kimi.com/code/console`），状态卡与托盘悬停文案同步；**低额告警仅 DeepSeek 生效**（Kimi 是周期配额），设置页告警区在 Kimi 来源下折叠为说明文案；顶栏文本 MaxWidth 放宽至 160（双窗口文本比 ¥ 金额宽，极端值 `5h: 100% / 7d: 100%` ~140px，80/130 均会截断）。
+- 诊断面板「余额显示」行标注当前来源。
+- **修复**：点余额菜单「刷新」时 `ShowBalanceStatus` 无条件 `BalanceMenuPopup.IsOpen = false` 会瞬关菜单、杀掉收拢动画——改为收拢动画在跑时不动它（`PopupAnimator.IsClosing` 新增公开查询；非菜单来源路径仍瞬关防叠显）。
+- **调参与钩子化**：状态卡轻量档 200ms/120ms 肉眼不可感知——`LightOpen` 320ms（FadeMs 260 / BlurMs 280 / 模糊 8）、`LightClose` 220ms；两档仅此一处调用，不影响菜单。**根因修复**：状态卡从 `StaysOpen=False`（系统级瞬关，绕过一切动画——实测"只有打开动画"的元凶）改为 `StaysOpen=True` 并接入全局鼠标钩子——点击外部经 `DismissBalanceStatus()` 播淡出（与自动消失同一入口，序号失效 + PlayClose 幂等防竞态）；钩子安装/卸载并入菜单同款 Install/IfIdle 流程。

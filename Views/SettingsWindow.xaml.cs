@@ -19,8 +19,8 @@ public partial class SettingsWindow : Window
     private const int DWMWCP_ROUND = 2;
 
     private const string AuthMessage =
-        "显示余额需要读取 ~/.dsh/.credentials.yaml 中的 DEEPSEEK_API_KEY。\n\n" +
-        "Key 只在本机用于向 DeepSeek 官方接口查询余额：不写入本应用配置、不写进日志；" +
+        "显示余额 / 额度需要读取 ~/.dsh/.credentials.yaml 中的 DEEPSEEK_API_KEY / KIMI_CODING_API_KEY（按显示来源取用其一）。\n\n" +
+        "Key 只在本机用于向官方接口查询余额 / 额度：不写入本应用配置、不写进日志；" +
         "可随时在设置页撤销授权。";
 
     private readonly Action<bool> _themeHandler;
@@ -45,6 +45,10 @@ public partial class SettingsWindow : Window
         ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
         ChkBalanceAlert.IsChecked = AppSettings.Current.BalanceAlertEnabled;
         ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
+        // 余额显示来源回显（非法值按 deepseek 兜底）
+        var source = AppSettings.Current.BalanceSource;
+        RadioSourceDeepSeek.IsChecked = source != "kimi";
+        RadioSourceKimi.IsChecked = source == "kimi";
         // 界面缩放回显（非法值按 100% 兜底）
         var zoom = AppSettings.Current.ZoomPercent;
         RadioZoom100.IsChecked = zoom == 100 || (zoom != 125 && zoom != 150);
@@ -118,6 +122,14 @@ public partial class SettingsWindow : Window
 
     // ---------------- 余额告警 ----------------
 
+    /// <summary>显示来源变更即保存；告警区仅 DeepSeek 提供（Kimi 为周期配额，改用说明文案）。</summary>
+    private void OnBalanceSourceChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.BalanceSource = RadioSourceKimi.IsChecked == true ? "kimi" : "deepseek";
+        AppSettings.Current.Save();
+        UpdateAlertUI();
+    }
+
     private void OnBalanceAlertChanged(object sender, RoutedEventArgs e)
     {
         AppSettings.Current.BalanceAlertEnabled = ChkBalanceAlert.IsChecked == true;
@@ -127,7 +139,11 @@ public partial class SettingsWindow : Window
 
     private void UpdateAlertUI()
     {
-        AlertThresholdPanel.Visibility = ChkBalanceAlert.IsChecked == true
+        var isKimi = RadioSourceKimi.IsChecked == true;
+        ChkBalanceAlert.Visibility = isKimi ? Visibility.Collapsed : Visibility.Visible;
+        AlertHint.Visibility = isKimi ? Visibility.Collapsed : Visibility.Visible;
+        KimiAlertNote.Visibility = isKimi ? Visibility.Visible : Visibility.Collapsed;
+        AlertThresholdPanel.Visibility = !isKimi && ChkBalanceAlert.IsChecked == true
             ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -196,6 +212,9 @@ public partial class SettingsWindow : Window
             ApiKeyHint.Text = AppSettings.Current.EncryptedApiKey is null
                 ? "自动读取不可用时在此填写 DeepSeek 开放平台 API Key（platform.deepseek.com）。"
                 : "已保存手动 API Key（DPAPI 加密存储）。";
+            KimiApiKeyHint.Text = AppSettings.Current.EncryptedKimiApiKey is null
+                ? "自动读取不可用时在此填写 Kimi for Coding API Key（kimi.com/code/console）。"
+                : "已保存手动 Kimi API Key（DPAPI 加密存储）。";
         }
     }
 
@@ -228,6 +247,18 @@ public partial class SettingsWindow : Window
         try
         {
             Process.Start(new ProcessStartInfo("https://platform.deepseek.com/api_keys") { UseShellExecute = true });
+        }
+        catch
+        {
+            // 打不开链接不影响使用
+        }
+    }
+
+    private void KimiApiKeyLink_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://www.kimi.com/code/console") { UseShellExecute = true });
         }
         catch
         {
@@ -296,6 +327,28 @@ public partial class SettingsWindow : Window
         AppSettings.Current.Save();
         ApiKeyBox.Clear();
         ApiKeyHint.Text = "已保存（DPAPI 加密存储）。";
+    }
+
+    /// <summary>Kimi Key 失焦即保存（与 DeepSeek 同模式：DPAPI 加密，清空防明文残留，失败如实提示）。</summary>
+    private void KimiApiKeyBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var key = KimiApiKeyBox.Password.Trim();
+        if (key.Length == 0)
+        {
+            AppSettings.Current.EncryptedKimiApiKey = null;
+            AppSettings.Current.Save();
+            return;
+        }
+        var encrypted = DpapiHelper.Encrypt(key);
+        if (encrypted is null)
+        {
+            KimiApiKeyHint.Text = "加密失败，未保存。请重试（或检查系统凭据服务）。";
+            return;
+        }
+        AppSettings.Current.EncryptedKimiApiKey = encrypted;
+        AppSettings.Current.Save();
+        KimiApiKeyBox.Clear();
+        KimiApiKeyHint.Text = "已保存（DPAPI 加密存储）。";
     }
 
     protected override void OnSourceInitialized(EventArgs e)

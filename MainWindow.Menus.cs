@@ -83,9 +83,9 @@ public partial class MainWindow
                 ShowMainWindow();
                 break;
             case "refresh":
-                // 余额菜单"刷新余额"：状态卡先显示"刷新中"，结果由 BalanceChanged 回调更新
+                // 余额菜单"刷新"：状态卡先显示"刷新中"，结果由 BalanceChanged 回调更新
                 _userRefreshPending = true;
-                ShowBalanceStatus("正在刷新余额…");
+                ShowBalanceStatus(BalanceProviders.IsKimi ? "正在刷新额度…" : "正在刷新余额…");
                 var result = await _balance.RefreshAsync();
                 if (result == BalanceMonitor.RefreshResult.Debounced ||
                     result == BalanceMonitor.RefreshResult.Stopped)
@@ -157,12 +157,15 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>打开 DeepSeek 开放平台充值页（默认浏览器）。</summary>
+    /// <summary>打开充值/用量页（默认浏览器）：DeepSeek → 开放平台 usage；Kimi → Kimi Code 控制台。</summary>
     private void OpenTopUpPage()
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://platform.deepseek.com/usage") { UseShellExecute = true });
+            var url = BalanceProviders.IsKimi
+                ? "https://www.kimi.com/code/console"
+                : "https://platform.deepseek.com/usage";
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -215,10 +218,10 @@ public partial class MainWindow
             _mouseHookProc = null; // 安装失败：退化为 Popup 自身 StaysOpen=False 行为
     }
 
-    /// <summary>所有菜单都关闭后卸载钩子（幂等）。</summary>
+    /// <summary>所有菜单与余额状态卡都关闭后卸载钩子（幂等）。</summary>
     private void UninstallDismissHookIfIdle()
     {
-        if (MenuPopup.IsOpen || BalanceMenuPopup.IsOpen || TrayMenuPopup.IsOpen) return;
+        if (MenuPopup.IsOpen || BalanceMenuPopup.IsOpen || TrayMenuPopup.IsOpen || BalanceStatusPopup.IsOpen) return;
         if (_mouseHook == IntPtr.Zero) return;
         UnhookWindowsHookEx(_mouseHook);
         _mouseHook = IntPtr.Zero;
@@ -265,6 +268,14 @@ public partial class MainWindow
                                     if (!rect.Contains(pt))
                                         AnimateMenuClose(popup, PanelOf(popup), true);
                                 }
+                            }
+                            // 余额状态卡（StaysOpen=True）：点击落在卡片外 → 动画淡出；
+                            // 不做锚点豁免（点余额按钮本意就是换菜单，卡片应让位），无安全区内缩
+                            if (BalanceStatusPopup.IsOpen)
+                            {
+                                var scRect = GetPopupScreenRect(BalanceStatusPopup);
+                                if (!scRect.IsEmpty && !scRect.Contains(pt))
+                                    DismissBalanceStatus();
                             }
                             UninstallDismissHookIfIdle();
                         }

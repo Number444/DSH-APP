@@ -162,7 +162,7 @@
                    FontWeight="SemiBold"
                    Foreground="{DynamicResource TextPrimaryBrush}" />
         <CheckBox x:Name="ChkShowBalance"
-                  Content="在顶栏显示 DeepSeek 余额"
+                  Content="在顶栏显示余额 / 额度"
                   Margin="0,10,0,0"
                   Style="{DynamicResource ToggleSwitchStyle}"
                   Checked="OnShowBalanceChanged"
@@ -171,7 +171,31 @@
         <StackPanel x:Name="BalanceOptions"
                     Margin="0,10,0,0"
                     Visibility="Collapsed">
+            <!-- 显示来源：DeepSeek ¥ 余额 / Kimi 配额（5h + 周双窗口剩余百分比） -->
+            <TextBlock Text="显示来源"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextWeakBrush}" />
+            <Border Height="32"
+                    Margin="0,8,0,0"
+                    Padding="3"
+                    HorizontalAlignment="Left"
+                    Background="{DynamicResource TrackBgBrush}"
+                    CornerRadius="16">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="RadioSourceDeepSeek"
+                                 Content="DeepSeek 余额"
+                                 GroupName="BalanceSource"
+                                 Style="{DynamicResource CapsuleSegmentStyle}"
+                                 Checked="OnBalanceSourceChanged" />
+                    <RadioButton x:Name="RadioSourceKimi"
+                                 Content="Kimi 额度"
+                                 GroupName="BalanceSource"
+                                 Style="{DynamicResource CapsuleSegmentStyle}"
+                                 Checked="OnBalanceSourceChanged" />
+                </StackPanel>
+            </Border>
             <TextBlock x:Name="AuthStatusText"
+                       Margin="0,12,0,0"
                        FontSize="11"
                        Foreground="{DynamicResource TextWeakBrush}"
                        TextWrapping="Wrap" />
@@ -190,7 +214,7 @@
             <StackPanel x:Name="ManualKeyPanel"
                         Margin="0,10,0,0"
                         Visibility="Collapsed">
-                <TextBlock Text="API Key（自动读取不可用时）"
+                <TextBlock Text="DeepSeek API Key（自动读取不可用时）"
                            FontSize="11"
                            Foreground="{DynamicResource TextWeakBrush}" />
                 <StackPanel Orientation="Horizontal"
@@ -223,9 +247,43 @@
                            FontSize="11"
                            Foreground="{DynamicResource TextWeakBrush}"
                            TextWrapping="Wrap" />
+                <TextBlock Text="Kimi API Key（自动读取不可用时）"
+                           Margin="0,12,0,0"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextWeakBrush}" />
+                <StackPanel Orientation="Horizontal"
+                            Margin="0,6,0,0">
+                    <PasswordBox x:Name="KimiApiKeyBox"
+                                 Width="240"
+                                 Height="28"
+                                 FontSize="12"
+                                 Padding="6,0"
+                                 VerticalContentAlignment="Center"
+                                 CaretBrush="{DynamicResource TextPrimaryBrush}"
+                                 Background="{DynamicResource BgCardBrush}"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}"
+                                 BorderThickness="1"
+                                 LostFocus="KimiApiKeyBox_LostFocus" />
+                    <Button Content="获取 Key"
+                            Margin="8,0,0,0"
+                            Padding="10,0"
+                            FontSize="12"
+                            Style="{DynamicResource RoundedButton}"
+                            Background="{DynamicResource BgCardBrush}"
+                            Foreground="{DynamicResource TextPrimaryBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1"
+                            Click="KimiApiKeyLink_Click" />
+                </StackPanel>
+                <TextBlock x:Name="KimiApiKeyHint"
+                           Margin="0,6,0,0"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextWeakBrush}"
+                           TextWrapping="Wrap" />
             </StackPanel>
 
-            <!-- 余额告警（仅余额显示开启时可见） -->
+            <!-- 余额告警（仅余额显示开启且来源为 DeepSeek 时可见；Kimi 为周期配额不提供） -->
             <CheckBox x:Name="ChkBalanceAlert"
                       Content="余额低于阈值时提醒"
                       Margin="0,14,0,0"
@@ -254,11 +312,19 @@
                          BorderThickness="1"
                          LostFocus="ThresholdBox_LostFocus" />
             </StackPanel>
-            <TextBlock Text="余额跌破阈值时弹出系统通知，点击通知直达充值页。"
+            <TextBlock x:Name="AlertHint"
+                       Text="余额跌破阈值时弹出系统通知，点击通知直达充值页。"
                        Margin="0,6,0,0"
                        FontSize="11"
                        Foreground="{DynamicResource TextWeakBrush}"
                        TextWrapping="Wrap" />
+            <TextBlock x:Name="KimiAlertNote"
+                       Text="Kimi 额度为周期配额（5 小时窗口 + 周额度），状态色随剩余百分比变化，不提供低额提醒。"
+                       Margin="0,14,0,0"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextWeakBrush}"
+                       TextWrapping="Wrap"
+                       Visibility="Collapsed" />
         </StackPanel>
 
         <!-- ==================== 维护 ==================== -->

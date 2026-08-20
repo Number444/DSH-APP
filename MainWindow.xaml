@@ -86,20 +86,22 @@
                         Click="TitleBalance_Click"
                         Visibility="Collapsed">
                     <TextBlock x:Name="TitleBalanceText"
-                               MaxWidth="80"
+                               MaxWidth="160"
                                FontSize="12"
                                TextTrimming="CharacterEllipsis" />
                 </Button>
             </StackPanel>
 
             <!-- 余额刷新状态卡（锚定余额按钮下方；Popup 独立 HWND，不受 airspace 影响）。
+                 StaysOpen=True：点击外部统一走全局钩子动画淡出（v1.3.1 菜单同款——StaysOpen=False
+                 的自动瞬关会绕过动画直接消失）。
                  外层 Border 为动画承载（PopupAnimator 挂 BlurEffect），内层卡片挂静态阴影——
                  Effect 同一元素只能挂一个，阴影与动画模糊必须分层 -->
             <Popup x:Name="BalanceStatusPopup"
                    Placement="Bottom"
                    PlacementTarget="{Binding ElementName=TitleBalance}"
                    AllowsTransparency="True"
-                   StaysOpen="False"
+                   StaysOpen="True"
                    IsOpen="False">
                 <Border>
                     <Border Padding="12,8"

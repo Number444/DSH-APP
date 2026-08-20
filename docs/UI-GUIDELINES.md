@@ -131,6 +131,16 @@
 
 > 阈值固定（5 / 2，`MainWindow` 常量 `BalanceWarnThreshold` / `BalanceDangerThreshold`），与设置页"余额告警通知阈值"（可调、仅通知）相互独立；失败/无值状态回退按钮默认弱色（`TextWeakBrush`）。新增状态色必须双套字典同 key（R8）。
 
+**Kimi 额度状态色规范**（顶栏额度文字，显示来源 = Kimi 时生效；取 5h/7d 两窗口已用百分比的**较高值**分级）：
+
+| 已用百分比 | Token | 含义 |
+|---|---|---|
+| < 80% | `AccentBlueBrush`（公共蓝） | 正常（常驻蓝色） |
+| 80% ≤ 已用 < 90% | `BalanceAlertBrush`（告警黄） | 偏紧，建议关注 |
+| ≥ 90% | `AccentRedBrush`（危险红） | 即将用尽 |
+
+> 阈值固定（20 / 10，`MainWindow` 常量 `KimiWarnPercent` / `KimiDangerPercent`）；Kimi 为周期配额（次数），**不提供**托盘低额告警（仅 DeepSeek ¥ 余额有）。
+
 ### 4.2 字号阶梯与行高（**对齐规则核心**）
 
 | 级别 | 字号 | 行高 | 用途 |

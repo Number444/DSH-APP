@@ -68,7 +68,9 @@ public static class Diagnostics
         rows.Add(new DiagRow("最小化到托盘", s.MinimizeToTrayOnClose ? "开" : "关", DiagStatus.Info));
         rows.Add(new DiagRow("自动检查 Harness 更新", s.AutoCheckUpdate ? "开" : "关", DiagStatus.Info));
         rows.Add(new DiagRow("自动检查应用更新", s.AutoCheckAppUpdate ? "开" : "关", DiagStatus.Info));
-        rows.Add(new DiagRow("余额显示", s.ShowBalance ? $"开（阈值 ¥{s.BalanceAlertThreshold:0.##}）" : "关", DiagStatus.Info));
+        rows.Add(new DiagRow("余额显示", s.ShowBalance
+            ? (s.BalanceSource == "kimi" ? "开（Kimi 额度）" : $"开（DeepSeek，阈值 ¥{s.BalanceAlertThreshold:0.##}）")
+            : "关", DiagStatus.Info));
         rows.Add(new DiagRow("凭据读取授权", s.AllowReadDshCredentials ? "是" : "否", DiagStatus.Info));
 
         // 日志文件

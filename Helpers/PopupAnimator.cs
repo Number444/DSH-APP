@@ -24,15 +24,16 @@ public static class PopupAnimator
     /// <summary>菜单默认档：全套（垂直抛出 + 惯性回弹 + 模糊渐清）。</summary>
     public static readonly OpenOptions DefaultOpen = new();
 
-    /// <summary>轻量档：淡入 + 轻放大，无位移无弹性（状态卡等短生命周期提示）。</summary>
+    /// <summary>轻量档：淡入 + 轻放大，无位移无弹性（状态卡等短生命周期提示）。
+    /// v1.4.x 调参：200ms/缩放 10% 肉眼不可感知（用户实测"没有动画"），拉到 320ms 可感知量级。</summary>
     public static readonly OpenOptions LightOpen = new()
-    { DurationMs = 200, StartScale = 0.9, BlurRadius = 6, BlurMs = 160, Elastic = false, Fly = false };
+    { DurationMs = 320, StartScale = 0.9, BlurRadius = 8, BlurMs = 280, FadeMs = 260, Elastic = false, Fly = false };
 
     /// <summary>菜单默认关闭档：收拢缩小 + 模糊 + 渐隐。</summary>
     public static readonly CloseOptions DefaultClose = new();
 
-    /// <summary>轻量关闭：快速淡出 + 轻微缩小。</summary>
-    public static readonly CloseOptions LightClose = new() { DurationMs = 120, EndScale = 0.9, BlurRadius = 6 };
+    /// <summary>轻量关闭：淡出 + 轻微缩小（120ms ≈ 7 帧等同瞬关，拉到 220ms 可感知）。</summary>
+    public static readonly CloseOptions LightClose = new() { DurationMs = 220, EndScale = 0.9, BlurRadius = 6 };
 
     /// <summary>收拢动画进行中标志（幂等防重入；重新打开时复位）。</summary>
     private static readonly DependencyProperty IsClosingProperty = DependencyProperty.RegisterAttached(
@@ -133,6 +134,9 @@ public static class PopupAnimator
         translate.BeginAnimation(TranslateTransform.YProperty, glideTy);
         blur?.BeginAnimation(BlurEffect.RadiusProperty, clear);
     }
+
+    /// <summary>元素是否正在播放收拢动画（此期间不要再瞬关所属 Popup——瞬关会杀掉动画）。</summary>
+    public static bool IsClosing(FrameworkElement el) => (bool)el.GetValue(IsClosingProperty);
 
     /// <summary>
     /// 播放关闭动画。flyFrom = 打开时的抛出起点（DIP，相对最终位置，仅取 Y 分量）：非 null 时执行

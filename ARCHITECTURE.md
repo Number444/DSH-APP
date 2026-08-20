@@ -52,7 +52,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 自更新层 | `Server/AppUpdater.cs` | 壳自身（dsh-app.exe）更新:GitHub Releases 检查（tag/资产校验 fail-closed）、**Release 说明存取（`LatestReleaseNotes`，截断 1000 字符供确认弹窗展示）**、流式下载 + 同遍 SHA256、磁盘预检、进度节流、更新器脚本生成（内嵌模板提取）;网络策略直连优先 + 7890 代理兜底重试 |
 | 诊断层 | `Helpers/Diagnostics.cs` + `Views/DiagnosticsWindow` | 环境与运行状态并行采集（node 版本/服务状态/代理/GitHub 连通性/设置项）,敏感边界:绝不含凭据;纯文本一键复制 |
 | 版本层 | `Helpers/SemVer.cs` | semver 比较（提取自 HarnessUpdater,Harness 与应用自更新共用;pre-release 规则,不误报） |
-| 余额层 | `Server/BalanceMonitor.cs` + `Helpers/CredentialsReader.cs` | DeepSeek 余额轮询（60s）、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
+| 余额层 | `Server/BalanceMonitor.cs` + `Server/BalanceProviders.cs` + `Helpers/CredentialsReader.cs` | 余额/额度轮询（60s）、**双来源 provider（DeepSeek ¥ 余额 / Kimi for Coding 配额，设置页切换）**、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
 | 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key），settings.json 持久化（Lazy + 原子替换） |
 | 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听；`ButtonBlueBrush`（主操作按钮，对比度达标） |
 | 安全层 | `Helpers/DpapiHelper.cs` | DPAPI 加解密（CurrentUser），密钥类字段存储 |
@@ -167,7 +167,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 ## 6. 可移植性设计
 
 - 壳内**零绝对路径硬编码**:不引用 `C:\Agent Space`、不引用 `~/.dsh`(服务器环境由 `dsh web` 按本机 profile 解析)
-- **唯一例外(用户特批)**:余额显示功能在用户经确认弹窗**显式授权**后读取 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY`(仅内存使用、不落盘、可随时在设置页撤销);未授权一律回退环境变量/手动填写,绝无隐式读取
+- **唯一例外(用户特批)**:余额显示功能在用户经确认弹窗**显式授权**后读取 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY` / `KIMI_CODING_API_KEY`(按显示来源取用其一;仅内存使用、不落盘、可随时在设置页撤销);未授权一律回退环境变量/手动填写,绝无隐式读取
 - **端口可配置/容错**:默认 3080,并发探测 3080~3090
 - 日志与 WebView2 数据均在 `%LOCALAPPDATA%\dsh-app\`,不写安装目录,避免权限问题
 - 应用自更新目录 `%LOCALAPPDATA%\dsh-app\update\`:下载残留（*.part/*.new/*.sha256，启动清理）、backup/（更新器独占）、updater.log、rolled-back.flag、apply-update.ps1（运行时生成）
