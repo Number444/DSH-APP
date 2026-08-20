@@ -120,6 +120,24 @@
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}" />
 
+        <!-- ==================== 通知 ==================== -->
+        <TextBlock Text="通知"
+                   Margin="0,16,0,0"
+                   FontSize="13"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}" />
+        <CheckBox x:Name="ChkSessionNotify"
+                  Content="会话完成时弹出系统通知"
+                  Margin="0,10,0,0"
+                  Style="{DynamicResource ToggleSwitchStyle}"
+                  Checked="OnSessionNotifyChanged"
+                  Unchecked="OnSessionNotifyChanged" />
+        <TextBlock Text="模型输出完成（或出错）时通过 Windows 通知提醒；窗口最小化到托盘时同样生效。"
+                   Margin="0,6,0,0"
+                   FontSize="11"
+                   Foreground="{DynamicResource TextWeakBrush}"
+                   TextWrapping="Wrap" />
+
         <!-- ==================== 显示 ==================== -->
         <TextBlock Text="显示"
                    Margin="0,16,0,0"

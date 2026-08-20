@@ -47,6 +47,7 @@ public partial class SettingsWindow : Window
         ChkAutoCheckAppUpdate.IsChecked = AppSettings.Current.AutoCheckAppUpdate;
         ChkShowBalance.IsChecked = AppSettings.Current.ShowBalance;
         ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
+        ChkSessionNotify.IsChecked = AppSettings.Current.SessionCompletionNotify;
         ChkBalanceAlert.IsChecked = AppSettings.Current.BalanceAlertEnabled;
         ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
         // 余额显示来源回显（非法值按 deepseek 兜底）
@@ -110,6 +111,13 @@ public partial class SettingsWindow : Window
     private void OnTrayCloseChanged(object sender, RoutedEventArgs e)
     {
         AppSettings.Current.MinimizeToTrayOnClose = ChkTrayClose.IsChecked == true;
+        AppSettings.Current.Save();
+    }
+
+    // ---------------- 通知（会话完成） ----------------
+    private void OnSessionNotifyChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.SessionCompletionNotify = ChkSessionNotify.IsChecked == true;
         AppSettings.Current.Save();
     }
 

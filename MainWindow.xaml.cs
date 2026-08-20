@@ -115,6 +115,10 @@ public partial class MainWindow : Window
         _balance.BalanceAmountChanged += amount => DispatchUi(() => OnBalanceAmountChanged(amount));
         _balance.RefreshFailed += err => DispatchUi(() => OnBalanceRefreshFailed(err));
 
+        // 会话完成通知：直连服务事件流（托盘化/页面挂起期间照常工作），回调同样经 Dispatcher 上 UI
+        _completionNotify.Log += msg => DispatchUi(() => AppendLog(msg));
+        _completionNotify.SessionFinished += (id, err) => DispatchUi(() => OnSessionFinished(id, err));
+
         // 顶栏菜单：公共菜单控件 + 数据驱动菜单项（更新状态高亮由 UpdateMenuItems 维护）
         TopMenu.ItemClicked += OnTopMenuClicked;
         UpdateMenuItems();
@@ -199,6 +203,9 @@ public partial class MainWindow : Window
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
+
+            // 完成通知监听不依赖页面加载：服务就绪即启动（WebView2 挂起/崩溃期间照样通知）
+            StartCompletionNotifyIfEnabled();
 
             WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
         }
@@ -354,6 +361,7 @@ public partial class MainWindow : Window
             var title = Clip(root.TryGetProperty("title", out var t) ? t.GetString() : null, 80);
             var body = Clip(root.TryGetProperty("body", out var b) ? b.GetString() : null, 200);
             if (title.Length == 0 && body.Length == 0) return;
+            _balloonKind = BalloonKind.Completion; // 插件过渡期的完成通知同属此类（点击恢复窗口）
             TrayIcon.ShowBalloonTip(title, body, Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info);
         }
         catch (Exception ex)
@@ -670,6 +678,8 @@ public partial class MainWindow : Window
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
+            // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
+            StartCompletionNotifyIfEnabled();
             if (WebView.CoreWebView2 is null)
             {
                 // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
@@ -750,6 +760,8 @@ public partial class MainWindow : Window
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
+            // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
+            StartCompletionNotifyIfEnabled();
             if (WebView.CoreWebView2 is null)
             {
                 // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
@@ -945,6 +957,7 @@ public partial class MainWindow : Window
         _server.Dispose();
         _balance.Stop();
         _balance.Dispose();
+        _completionNotify.Dispose(); // 先停事件流监听，迟到的完成帧回调经 DispatchUi 空转不碰已销毁 UI
         _updater.Dispose();
         _appUpdater.Dispose();
         App.ActiveServer = null;

@@ -34,6 +34,9 @@ public sealed class AppSettings
     /// <summary>关闭窗口时最小化到托盘（服务继续运行；默认开）。关 = 关窗即退出（v1.1 行为）。</summary>
     public bool MinimizeToTrayOnClose { get; set; } = true;
 
+    /// <summary>会话完成时弹出系统通知（默认开；壳直连服务事件流检测，托盘化/页面挂起期间照常生效）。</summary>
+    public bool SessionCompletionNotify { get; set; } = true;
+
     /// <summary>余额低于阈值时提醒（默认开，仅在余额监控运行时生效）。</summary>
     public bool BalanceAlertEnabled { get; set; } = true;
 

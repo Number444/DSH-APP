@@ -40,8 +40,8 @@ public partial class MainWindow
             // 右键弹菜单（与 APP 内同款 Popup 菜单；不设 ContextMenu，避免系统样式/动画差异）。
             // 用 Up 而非 Down：按下时打开会让同一交互序列的弹起被 Popup 当作"外部点击"而立即关闭（闪烁）。
             TrayIcon.TrayRightMouseUp += (_, _) => OpenTrayMenu();
-            // 余额告警气泡点击 → 充值页
-            TrayIcon.TrayBalloonTipClicked += (_, _) => OpenTopUpPage();
+            // 气泡点击按种类路由（余额 → 充值页；完成通知 → 恢复窗口；见 MainWindow.Notify.cs）
+            TrayIcon.TrayBalloonTipClicked += (_, _) => OnBalloonClicked();
         }
         catch (Exception ex)
         {

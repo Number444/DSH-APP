@@ -135,6 +135,7 @@ public partial class MainWindow
                 (Brush)FindResource("AccentOrangeBrush"), stayMs: 4000);
         try
         {
+            _balloonKind = BalloonKind.Balance; // 点击路由标记（MainWindow.Notify.cs）
             TrayIcon.ShowBalloonTip("DeepSeek 余额不足",
                 $"当前余额 ¥{amount:0.00}，低于阈值 ¥{threshold:0.00}。\n点击此通知前往充值。",
                 Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Warning);

@@ -125,13 +125,15 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>打开设置窗口（顶栏菜单 / 托盘菜单共用）；关闭后同步余额开关状态。</summary>
+    /// <summary>打开设置窗口（顶栏菜单 / 托盘菜单共用）；关闭后同步余额与完成通知开关状态。</summary>
     private void OpenSettingsDialog()
     {
         var dlg = new Views.SettingsWindow { Owner = this };
         dlg.ShowDialog();
         // 设置可能改了余额开关，关闭后同步启动/停止
         SyncBalanceFromSettings();
+        // 设置可能改了完成通知开关，关闭后同步启动/停止
+        SyncCompletionNotifyFromSettings();
         // 设置可能改了界面缩放
         ApplyZoomFromSettings();
     }
