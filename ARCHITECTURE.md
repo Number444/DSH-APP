@@ -87,7 +87,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
            → InitWebViewAsync:CoreWebView2Environment.CreateAsync(null, %LOCALAPPDATA%\dsh-app\WebView2)  ← 与 Edge 隔离
              → DefaultBackgroundColor=#0D1117(消白闪) → EnsureCoreWebView2Async()
              → Profile.PreferredColorScheme=Dark(页面滚动条/表单深色)
-             → 订阅 NavigationCompleted / ProcessFailed
+             → 订阅 NavigationCompleted / ProcessFailed / PermissionRequested（仅对本机 Harness 源放行通知权限——WebView2 无询问 UI、未处理即静默拒绝，浏览器端通知插件依赖此放行；其余权限保持默认拒绝，授权持久化于壳 profile）
            → EnsureServerAsync:
              → DetectRunningServerAsync(): 并发 HTTP GET 3080~3090(Task.WhenAll,最坏 ~1s,取存活最小端口)
                  ├─ 命中 → 记录监听 PID(netstat)+ 身份验证(CIM 命令行含 dsh/bin.js 特征)

@@ -258,6 +258,9 @@ public partial class MainWindow : Window
         wv.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Dark;
         // 页面 target=_blank 外链：壳内无多窗口概念，接管抛系统浏览器
         wv.NewWindowRequested += OnNewWindowRequested;
+        // 页面权限请求：WebView2 无浏览器式询问 UI，未处理的请求一律静默拒绝——
+        // 对本机 Harness 源放行通知权限（浏览器端通知插件可用），其余权限不触碰（默认拒绝）
+        wv.PermissionRequested += OnPermissionRequested;
 
         wv.NavigationCompleted += OnNavigationCompleted;
         wv.ProcessFailed += OnProcessFailed;
@@ -282,6 +285,19 @@ public partial class MainWindow : Window
         {
             AppendLog($"打开外链失败: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// WebView2 权限请求：宿主不处理则一律静默拒绝（无浏览器式询问 UI）。
+    /// 仅对本机 Harness 源（loopback + 当前服务端口）放行通知权限，其余权限/来源不触碰
+    /// （State 保持 Default = 拒绝，fail-closed）；授权持久化于壳的独立 profile。
+    /// </summary>
+    private void OnPermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
+    {
+        if (e.PermissionKind != CoreWebView2PermissionKind.Notifications) return;
+        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
+        if (uri.IsLoopback && uri.Port == _server.Port)
+            e.State = CoreWebView2PermissionState.Allow;
     }
 
     /// <summary>应用设置中的界面缩放（100/125/150% → ZoomFactor；初始化与设置窗关闭后各调一次）。</summary>
