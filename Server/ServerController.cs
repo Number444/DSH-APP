@@ -284,7 +284,7 @@ public sealed class ServerController : IDisposable
             var psi = new ProcessStartInfo
             {
                 FileName = nodeExe,
-                Arguments = $"\"{dshBin}\" web",
+                Arguments = $"\"{dshBin}\" web --no-open",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
