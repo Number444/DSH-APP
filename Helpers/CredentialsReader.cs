@@ -80,7 +80,8 @@ public static class CredentialsReader
         return key;
     }
 
-    /// <summary>读取单个路径下的凭据文件并取指定键；任何失败均返回 null（不抛异常）。</summary>
+    /// <summary>读取单个路径下的凭据文件并取指定键；任何失败均返回 null（不抛异常）。
+    /// 兼容两种布局：平铺旧格式（键在顶层）与 dsh rc.8 起的嵌套格式（version: 1 + refs: { KEY: value }）。</summary>
     private static string? TryReadKey(string? path, string keyName)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
@@ -93,13 +94,26 @@ public static class CredentialsReader
                 return null;
 
             var deserializer = new DeserializerBuilder().Build();
-            var dict = deserializer.Deserialize<Dictionary<string, string>>(text);
+            var dict = deserializer.Deserialize<Dictionary<string, object>>(text);
             if (dict is null)
                 return null;
 
-            // 值必须为非空字符串
-            if (dict.TryGetValue(keyName, out var key) && !string.IsNullOrWhiteSpace(key))
-                return key;
+            // ① 平铺旧格式：键直接位于顶层（值必须为非空字符串）
+            if (dict.TryGetValue(keyName, out var direct) &&
+                direct is string directValue && !string.IsNullOrWhiteSpace(directValue))
+                return directValue;
+
+            // ② 嵌套新格式（dsh rc.8 起）：version: 1 + refs: { KEY: value }
+            if (dict.TryGetValue("refs", out var refsObj) &&
+                refsObj is System.Collections.IDictionary refs)
+            {
+                foreach (System.Collections.DictionaryEntry entry in refs)
+                {
+                    if (string.Equals(entry.Key?.ToString(), keyName, StringComparison.Ordinal) &&
+                        entry.Value is string refValue && !string.IsNullOrWhiteSpace(refValue))
+                        return refValue;
+                }
+            }
 
             return null;
         }

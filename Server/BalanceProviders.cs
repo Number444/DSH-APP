@@ -375,7 +375,8 @@ internal sealed class KimiUsageProvider : BalanceProviderBase
         }
     }
 
-    /// <summary>读取一个配额窗口（detail 子对象优先，根对象兜底）：limit/used/resetTime。</summary>
+    /// <summary>读取一个配额窗口（detail 子对象优先，根对象兜底）：limit/used/resetTime。
+    /// used 缺失时兼容 remaining（API 5h 窗口 detail 只返回剩余量），按 used = limit - remaining 换算。</summary>
     private static QuotaWindow? ReadWindow(JsonElement node)
     {
         // limits[] 条目的数值在 detail 子对象；根 usage 直接在节点上
@@ -385,8 +386,21 @@ internal sealed class KimiUsageProvider : BalanceProviderBase
 
         if (!TryGetLong(holder, "limit", out var limit) || limit <= 0)
             return null;
-        if (!TryGetLong(holder, "used", out var used))
+
+        long used;
+        if (TryGetLong(holder, "used", out used))
+        {
+            // used 已直接提供
+        }
+        else if (TryGetLong(holder, "remaining", out var remaining))
+        {
+            // 只给剩余量（5h 窗口）：换算已用 = limit - remaining，钳位非负（统计延迟可能让 remaining 略超 limit）
+            used = Math.Max(0, limit - remaining);
+        }
+        else
+        {
             return null;
+        }
 
         // 钳位 0~100：API 统计延迟可能使 used 短暂大于 limit，百分比破百会让用户困惑
         var percent = Math.Clamp(used * 100m / limit, 0m, 100m);
