@@ -56,6 +56,10 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>余额失败边沿提醒标志：成功→失败跳变时提醒一次（状态卡/托盘气泡），恢复后复位。
+    /// 防 60s 轮询连续失败反复轰炸（与 _wasAboveThreshold 阈值告警同模式）。</summary>
+    private bool _balanceErrorNotified;
+
     private void OnBalanceChanged(string? text)
     {
         // 托盘悬停同步余额（窗口隐藏时也能看到；状态段由 UpdateTrayToolTip 组合）
@@ -65,22 +69,37 @@ public partial class MainWindow
         var isKimi = BalanceProviders.IsKimi;
         if (text is null)
         {
-            TitleBalanceText.Text = "—";
-            // 失败/无值：显式弱色（SetResourceReference = DynamicResource 语义，主题切换即时跟随）
-            TitleBalanceText.SetResourceReference(TextBlock.ForegroundProperty, "TextWeakBrush");
+            // 三分支：未授权（文件在）→ 弱色"—"引导点击授权；网络连续失败 → NET_ERR；其余业务失败 → ERROR
+            var authOffer = _balance.AuthOfferPending;
+            var isNet = _balance.LastFailureIsNetwork;
+            TitleBalanceText.Text = authOffer ? "—" : isNet ? "NET_ERR" : "ERROR";
+            TitleBalanceText.SetResourceReference(TextBlock.ForegroundProperty,
+                authOffer ? "TextWeakBrush" : "AccentRedBrush");
             var label = isKimi ? "额度" : "余额";
             TitleBalance.ToolTip = _balance.LastError is null
                 ? $"{label}获取失败（点击重试）"
-                : $"{label}获取失败：{_balance.LastError}（点击重试）";
+                : authOffer
+                    ? $"{_balance.LastError}"
+                    : $"{label}获取失败：{_balance.LastError}（点击重试）";
             if (_userRefreshPending)
             {
                 _userRefreshPending = false;
+                _balanceErrorNotified = true; // 手动刷新已弹卡，同一失败不再走边沿弹窗
                 ShowBalanceStatus($"✗ 刷新失败：{_balance.LastError ?? "未知原因"}",
                     (Brush)FindResource("AccentRedBrush"));
+            }
+            else if (!authOffer)
+            {
+                // 授权开启/已配置 Key 且未返回真实结果：边沿提醒一次（状态卡或托盘气泡，含原因）。
+                // 网络类失败弹窗阈值 ≥2 次连续（Four 指定）；业务失败（key 无效等）立即提醒
+                if (!isNet || _balance.NetFailStreak >= 2)
+                    NotifyBalanceFailureEdge(_balance.LastError ?? "未知原因", isNet, isKimi);
             }
         }
         else
         {
+            // 恢复成功：复位失败边沿提醒标志（下次失败重新提醒一次）
+            _balanceErrorNotified = false;
             // DeepSeek：金额文本（"23.50"）加 ¥ 前缀；Kimi：完整双窗口已用百分比文本（"5h: 13% / 7d: 56%"）
             TitleBalanceText.Text = isKimi ? text : $"¥ {text}";
             TitleBalance.ToolTip = _balance.DetailText +
@@ -143,6 +162,31 @@ public partial class MainWindow
         catch (Exception ex)
         {
             AppendLog($"余额告警气泡失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>余额获取失败的边沿提醒（成功→失败跳变时一次）：
+    /// 窗口可见 → 余额状态卡（红色，含原因）；托盘化/最小化 → 托盘气泡（点击打开设置页）。</summary>
+    private void NotifyBalanceFailureEdge(string error, bool isNet, bool isKimi)
+    {
+        if (_balanceErrorNotified) return;
+        _balanceErrorNotified = true;
+        var title = isNet ? "网络连接异常" : isKimi ? "Kimi 额度获取失败" : "DeepSeek 余额获取失败";
+        if (IsVisible)
+        {
+            ShowBalanceStatus($"✗ {error}", (Brush)FindResource("AccentRedBrush"), stayMs: 4000);
+            return;
+        }
+        try
+        {
+            _balloonKind = BalloonKind.BalanceError; // 点击路由：打开设置页（MainWindow.Notify.cs）
+            TrayIcon.ShowBalloonTip(title,
+                $"{error}\n点击此通知打开设置。",
+                Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Error);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"余额失败气泡失败: {ex.Message}");
         }
     }
 
@@ -261,6 +305,20 @@ public partial class MainWindow
     private void TitleBalance_Click(object sender, RoutedEventArgs e)
     {
         if (TitleBalance.Visibility != Visibility.Visible) return;
+        // 授权引导（授权时机盲区修复）：凭据文件存在但未授权时，点击余额区直接弹授权确认，
+        // 允许后立即刷新——无需进设置页（文件晚于开关出现的场景不再静默失败）
+        if (_balance.AuthOfferPending && !AppSettings.Current.AllowReadDshCredentials)
+        {
+            var dlg = new Views.ConfirmDialog("允许 dsh-app 读取 dsh 凭据？",
+                Views.SettingsWindow.AuthMessage, "允许", "暂不") { Owner = this };
+            if (dlg.ShowDialog() == true)
+            {
+                AppSettings.Current.AllowReadDshCredentials = true;
+                AppSettings.Current.Save();
+                _ = _balance.RefreshAsync();
+            }
+            return;
+        }
         // 弹回动效已在 PreviewMouseUp 统一处理（含按下拖出场景）；此处只做菜单开关
         if (BalanceMenuPopup.IsOpen)
             AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true);

@@ -44,6 +44,12 @@ public static class CredentialsReader
     /// <summary>凭据文件是否存在（&lt;DshHomePath&gt;/.credentials.yaml）。</summary>
     public static bool CredentialsFileExists => CredentialsFilePath is { } path && File.Exists(path);
 
+    /// <summary>主路径或兜底路径下凭据文件是否存在（错误文案分层与授权引导用）：
+    /// 与 ReadKey 的两处尝试口径一致——任一位置有文件即视为"凭据文件存在"。</summary>
+    public static bool AnyCredentialsFileExists =>
+        CredentialsFileExists ||
+        (DefaultCredentialsFilePath is { } fallback && File.Exists(fallback));
+
     /// <summary>
     /// 仅当 AppSettings.AllowReadDshCredentials == true 时读取 DEEPSEEK_API_KEY 的值。
     /// </summary>

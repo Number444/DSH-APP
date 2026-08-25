@@ -116,6 +116,19 @@ internal abstract class BalanceProviderBase : IBalanceProvider
     /// <summary>查询接口地址。</summary>
     protected abstract string Url { get; }
 
+    /// <summary>Key 来源链全部未命中时的分层错误文案（排查误导修复）：
+    /// 未授权（文件在，可引导一键授权）/ 文件缺失 / 键未读到 / 完全未配置，四种情形文案各异。</summary>
+    protected static string ResolveMissError(string keyName)
+    {
+        if (!AppSettings.Current.AllowReadDshCredentials)
+            return CredentialsReader.AnyCredentialsFileExists
+                ? "已检测到 dsh 凭据文件，但未授权读取（点击顶栏余额区可授权）"
+                : "未配置 API Key";
+        if (!CredentialsReader.AnyCredentialsFileExists)
+            return "未找到 dsh 凭据文件（~/.dsh/.credentials.yaml）";
+        return $"凭据文件中未读到 {keyName}（键缺失或格式不兼容）";
+    }
+
     /// <summary>解析成功响应体；实现内不得输出异常细节（红线：不得含 key 明文）。</summary>
     protected abstract FetchOutcome Parse(string json);
 }
@@ -163,6 +176,7 @@ internal sealed class DeepSeekBalanceProvider : BalanceProviderBase
             error = "API Key 解密失败";
         }
 
+        error ??= ResolveMissError(CredentialsReader.DeepSeekApiKeyName);
         return null;
     }
 
@@ -286,6 +300,7 @@ internal sealed class KimiUsageProvider : BalanceProviderBase
             error = "API Key 解密失败";
         }
 
+        error ??= ResolveMissError(CredentialsReader.KimiCodingApiKeyName);
         return null;
     }
 

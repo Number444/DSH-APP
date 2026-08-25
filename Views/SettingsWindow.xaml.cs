@@ -18,7 +18,8 @@ public partial class SettingsWindow : Window
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     private const int DWMWCP_ROUND = 2;
 
-    private const string AuthMessage =
+    /// <summary>授权确认框文案（设置页与主窗口余额区一键授权共用）。</summary>
+    internal const string AuthMessage =
         "显示余额 / 额度需要读取 ~/.dsh/.credentials.yaml 中的 DEEPSEEK_API_KEY / KIMI_CODING_API_KEY（按显示来源取用其一）。\n\n" +
         "Key 只在本机用于向官方接口查询余额 / 额度：不写入本应用配置、不写进日志；" +
         "可随时在设置页撤销授权。";

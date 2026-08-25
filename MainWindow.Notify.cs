@@ -21,6 +21,7 @@ public partial class MainWindow
     {
         None,
         Balance,
+        BalanceError,
         Completion,
     }
 
@@ -79,6 +80,10 @@ public partial class MainWindow
         {
             case BalloonKind.Balance:
                 OpenTopUpPage();
+                break;
+            case BalloonKind.BalanceError:
+                ShowMainWindow();
+                OpenSettingsDialog();
                 break;
             case BalloonKind.Completion:
                 ShowMainWindow();

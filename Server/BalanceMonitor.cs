@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Windows;
+using dsh_app.Helpers;
 
 namespace dsh_app.Server;
 
@@ -31,6 +32,9 @@ public sealed class BalanceMonitor : IDisposable
     private long _lastRequestMs;
     private string? _lastBalanceText;
 
+    /// <summary>连续网络类失败计数（KeepOld 路径）：≥2 升级为展示级失败（NET_ERR）；成功/业务失败清零。</summary>
+    private int _netFailStreak;
+
     /// <summary>已停止标志（Stop/Dispose 后置真；在途请求完成回调时忽略）。
     /// 全部通过 Volatile.Read/Write 访问（不使用 volatile 关键字以免 CS0420）。</summary>
     private bool _stopped = true;
@@ -56,6 +60,15 @@ public sealed class BalanceMonitor : IDisposable
 
     /// <summary>当前生效的 Key 来源：凭据文件 / 环境变量 / 手动（无 key 时为 null）。</summary>
     public string? ActiveSource { get; private set; }
+
+    /// <summary>最近一次展示级失败是否为网络类（true → UI 显示 NET_ERR；false → ERROR）。</summary>
+    public bool LastFailureIsNetwork { get; private set; }
+
+    /// <summary>最近失败源于"凭据文件存在但未授权"（UI 据此引导一键授权，不显示 ERROR）。</summary>
+    public bool AuthOfferPending { get; private set; }
+
+    /// <summary>当前连续网络类失败次数（UI 据此将网络弹窗阈值控制在 ≥2 次，显示与弹窗分离）。</summary>
+    public int NetFailStreak => _netFailStreak;
 
     /// <summary>启动轮询：立即查一次 + 60s 定时。幂等：已启动不重复。</summary>
     public void Start()
@@ -175,7 +188,9 @@ public sealed class BalanceMonitor : IDisposable
 
         if (string.IsNullOrEmpty(key))
         {
-            PublishFailure(keyError ?? "未配置 API Key", source, sourceKimi);
+            PublishFailure(keyError ?? "未配置 API Key", source, sourceKimi,
+                authOffer: !AppSettings.Current.AllowReadDshCredentials
+                           && Helpers.CredentialsReader.AnyCredentialsFileExists);
             return;
         }
 
@@ -196,6 +211,9 @@ public sealed class BalanceMonitor : IDisposable
                 _lastBalanceText = outcome.BalanceText;
                 LastBalance = outcome.BalanceAmount;
                 LastError = null;
+                _netFailStreak = 0;
+                LastFailureIsNetwork = false;
+                AuthOfferPending = false;
                 BalanceChanged?.Invoke(outcome.BalanceText);
                 BalanceAmountChanged?.Invoke(outcome.BalanceAmount);
             });
@@ -209,13 +227,29 @@ public sealed class BalanceMonitor : IDisposable
             if (BalanceProviders.IsKimi != sourceKimi) return; // 来源已切换：丢弃旧来源迟到响应
             ActiveSource = source;
             LastError = outcome.Error;
-            if (outcome.KeepOld && _lastBalanceText is not null)
+            if (outcome.KeepOld)
             {
-                // 保留上次显示值，仅更新错误原因；通知刷新失败（手动刷新的状态卡靠它反馈，
+                // 网络类失败：单次抖动静默（保留旧值，仅手动刷新给状态卡反馈）；
+                // 连续 ≥2 次或无旧值可留 → 升级为展示级失败（顶栏 NET_ERR 红字 + UI 边沿弹窗）
+                _netFailStreak++;
+                if (_netFailStreak >= 2 || _lastBalanceText is null)
+                {
+                    DetailText = null;
+                    _lastBalanceText = null;
+                    LastBalance = null;
+                    LastFailureIsNetwork = true;
+                    AuthOfferPending = false;
+                    BalanceChanged?.Invoke(null);
+                    BalanceAmountChanged?.Invoke(null);
+                }
+                // 通知刷新失败（手动刷新的状态卡靠它反馈，
                 // 否则用户点刷新遇网络错误时永远停在"正在刷新…"，且 pending 标志遗留到下次轮询误弹成功卡）
                 RefreshFailed?.Invoke(outcome.Error ?? "未知原因");
                 return;
             }
+            _netFailStreak = 0;
+            LastFailureIsNetwork = false;
+            AuthOfferPending = false;
             DetailText = null;
             _lastBalanceText = null;
             LastBalance = null;
@@ -224,8 +258,8 @@ public sealed class BalanceMonitor : IDisposable
         });
     }
 
-    /// <summary>发布失败结果（清空旧值并回调 null）。</summary>
-    private void PublishFailure(string error, string? source, bool sourceKimi)
+    /// <summary>发布失败结果（清空旧值并回调 null）。authOffer = 失败源于未授权（UI 引导一键授权）。</summary>
+    private void PublishFailure(string error, string? source, bool sourceKimi, bool authOffer = false)
     {
         Dispatch(() =>
         {
@@ -236,6 +270,9 @@ public sealed class BalanceMonitor : IDisposable
             _lastBalanceText = null;
             LastBalance = null;
             LastError = error;
+            _netFailStreak = 0;
+            LastFailureIsNetwork = false;
+            AuthOfferPending = authOffer;
             BalanceChanged?.Invoke(null);
             BalanceAmountChanged?.Invoke(null);
         });
