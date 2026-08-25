@@ -129,7 +129,17 @@
 | ¥2 ≤ 余额 < ¥5 | `BalanceAlertBrush`（告警黄） | 偏低，建议关注 |
 | < ¥2 | `AccentRedBrush`（危险红） | 严重不足，尽快充值 |
 
-> 阈值固定（5 / 2，`MainWindow` 常量 `BalanceWarnThreshold` / `BalanceDangerThreshold`），与设置页"余额告警通知阈值"（可调、仅通知）相互独立；失败/无值状态回退按钮默认弱色（`TextWeakBrush`）。新增状态色必须双套字典同 key（R8）。
+> 阈值固定（5 / 2，`MainWindow` 常量 `BalanceWarnThreshold` / `BalanceDangerThreshold`），与设置页"余额告警通知阈值"（可调、仅通知）相互独立。新增状态色必须双套字典同 key（R8）。
+
+**余额/额度失败状态规范**（顶栏失败三分支，"未发布"起）：
+
+| 状态 | 文本 / Token | 含义 |
+|---|---|---|
+| 未授权（凭据文件在） | `—` + `TextWeakBrush`（弱色） | 检测到 dsh 凭据文件但未授权；tooltip 引导，点击余额区弹授权确认框一键授权 |
+| 网络连续失败 | `NET_ERR` + `AccentRedBrush` | 连续 ≥2 次网络类失败（单次抖动静默保留旧值）；无旧值可留时首次即显示 |
+| 业务失败 | `ERROR` + `AccentRedBrush` | Key 无效/凭据键缺失/格式不兼容等；tooltip 带分层原因 |
+
+> 失败边沿提醒：成功→失败跳变提醒一次（窗口可见 → 红色状态卡；托盘化 → 系统气泡，点击恢复窗口并打开设置页），恢复后复位；网络类连续 2 次才弹，业务失败立即弹。
 
 **Kimi 额度状态色规范**（顶栏额度文字，显示来源 = Kimi 时生效；取 5h/7d 两窗口已用百分比的**较高值**分级）：
 
