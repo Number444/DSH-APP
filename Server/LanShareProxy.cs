@@ -178,7 +178,7 @@ public sealed class LanShareProxy : IDisposable
         catch (Exception ex)
         {
             WriteLog($"LAN 共享启动失败（端口 {listenPort}）：{ex.Message}");
-            await StopAsync(); // 清理半启动状态（绑定失败时 _app 未赋值，此处幂等）
+            await StopAsync(); // 清理半启动状态（_app 已提前挂字段，此处负责释放，幂等）
             return false;
         }
     }
@@ -242,12 +242,13 @@ public sealed class LanShareProxy : IDisposable
                || (b[0] == 172 && b[1] is >= 16 and <= 31);
     }
 
-    /// <summary>壳退出调用：同步等待停服（限 2s，Kestrel 回收不依赖 UI 线程）。</summary>
+    /// <summary>壳退出调用：同步等待停服（限 3s）。StopAsync 内部 await 会捕获 WPF 同步上下文，
+    /// 直接在 UI 线程 .Wait 会死锁 → 扔到线程池执行再等待（池线程无同步上下文，续体直接完成）。</summary>
     public void Dispose()
     {
         try
         {
-            StopAsync().Wait(ShutdownTimeout + TimeSpan.FromSeconds(1));
+            Task.Run(StopAsync).Wait(ShutdownTimeout + TimeSpan.FromSeconds(1));
         }
         catch
         {
