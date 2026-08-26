@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-26 · 版本 v1.5.1 · 本次更新:余额/额度失败状态可视化（ERROR / NET_ERR 红字分级 + 边沿弹窗 + 未授权一键补授权 + Key 缺失错误文案分层）、启动 dsh 服务禁用自动打开浏览器（--no-open）、凭据读取兼容嵌套格式修复、**局域网共享（LAN Share：壳内 Kestrel+YARP 代理转发 127.0.0.1:3080，token 门禁 + Host/Origin 重写 + 特权写操作拦截 + randomUUID polyfill 注入）**
+> 更新时间:2026-08-26 · 版本 v1.6.0 · 本次更新:局域网共享（LAN Share：壳内 Kestrel+YARP 代理转发 127.0.0.1:3080，token 门禁 + Host/Origin 重写 + 特权写操作拦截 + randomUUID polyfill 注入）
 
 ## 1. 架构定位:纯壳(Wrapper)
 
