@@ -129,6 +129,8 @@ public partial class MainWindow
     private void OpenSettingsDialog()
     {
         var dlg = new Views.SettingsWindow { Owner = this };
+        // LAN 共享设置变更即启停代理（fire-and-forget：设置窗内反复拨开关由 _lanShareLock 串行化）
+        dlg.LanShareChanged += () => _ = SyncLanShareFromSettingsAsync();
         dlg.ShowDialog();
         // 设置可能改了余额开关，关闭后同步启动/停止
         SyncBalanceFromSettings();

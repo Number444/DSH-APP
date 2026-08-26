@@ -118,6 +118,9 @@ public partial class MainWindow : Window
         _completionNotify.Log += msg => DispatchUi(() => AppendLog(msg));
         _completionNotify.SessionFinished += (id, err) => DispatchUi(() => OnSessionFinished(id, err));
 
+        // 局域网共享代理：日志/状态事件（见 MainWindow.LanShare.cs）
+        InitLanShare();
+
         // 顶栏菜单：公共菜单控件 + 数据驱动菜单项（更新状态高亮由 UpdateMenuItems 维护）
         TopMenu.ItemClicked += OnTopMenuClicked;
         UpdateMenuItems();
@@ -205,6 +208,9 @@ public partial class MainWindow : Window
 
             // 完成通知监听不依赖页面加载：服务就绪即启动（WebView2 挂起/崩溃期间照样通知）
             StartCompletionNotifyIfEnabled();
+
+            // 局域网共享：设置开启时随服务就绪启动代理（目标端口 = 实际服务端口）
+            await SyncLanShareFromSettingsAsync();
 
             WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
         }
@@ -600,6 +606,8 @@ public partial class MainWindow : Window
             }
             // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
             StartCompletionNotifyIfEnabled();
+            // 局域网共享代理重同步（服务端口可能变化）
+            await SyncLanShareFromSettingsAsync();
             if (WebView.CoreWebView2 is null)
             {
                 // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
@@ -682,6 +690,8 @@ public partial class MainWindow : Window
             }
             // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
             StartCompletionNotifyIfEnabled();
+            // 局域网共享代理重同步（服务端口可能变化）
+            await SyncLanShareFromSettingsAsync();
             if (WebView.CoreWebView2 is null)
             {
                 // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
@@ -875,6 +885,7 @@ public partial class MainWindow : Window
             _server.Shutdown();
         }
         _server.Dispose();
+        _lanShare.Dispose(); // 停 LAN 共享代理（限 2s，不拖退出）
         _balance.Stop();
         _balance.Dispose();
         _completionNotify.Dispose(); // 先停事件流监听，迟到的完成帧回调经 DispatchUi 空转不碰已销毁 UI

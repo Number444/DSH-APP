@@ -49,6 +49,9 @@ public partial class SettingsWindow : Window
         ChkShowBalance.IsChecked = AppSettings.Current.ShowBalance;
         ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
         ChkSessionNotify.IsChecked = AppSettings.Current.SessionCompletionNotify;
+        ChkLanShare.IsChecked = AppSettings.Current.LanShareEnabled;
+        LanPortBox.Text = AppSettings.Current.LanSharePort.ToString();
+        UpdateLanShareUI();
         ChkBalanceAlert.IsChecked = AppSettings.Current.BalanceAlertEnabled;
         ThresholdBox.Text = AppSettings.Current.BalanceAlertThreshold.ToString("0.##");
         // 余额显示来源回显（非法值按 deepseek 兜底）
@@ -120,6 +123,97 @@ public partial class SettingsWindow : Window
     {
         AppSettings.Current.SessionCompletionNotify = ChkSessionNotify.IsChecked == true;
         AppSettings.Current.Save();
+    }
+
+    // ---------------- 局域网共享 ----------------
+
+    /// <summary>LAN 共享设置变更（开关/端口/密钥）：主窗口订阅后重启代理。</summary>
+    internal event Action? LanShareChanged;
+
+    private void OnLanShareChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.LanShareEnabled = ChkLanShare.IsChecked == true;
+        AppSettings.Current.Save();
+        UpdateLanShareUI();
+        if (!_initializing)
+            LanShareChanged?.Invoke();
+    }
+
+    /// <summary>按设置刷新 LAN 区：面板显隐 + 访问地址（首选 192.168 段地址 + 端口 + 密钥）。</summary>
+    private void UpdateLanShareUI()
+    {
+        var on = ChkLanShare.IsChecked == true;
+        LanSharePanel.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        if (!on) return;
+
+        var addr = Server.LanShareProxy.GetLanIPv4Addresses().FirstOrDefault();
+        LanUrlBox.Text = addr is null
+            ? "（未检测到局域网地址，请检查网络连接）"
+            : $"http://{addr}:{AppSettings.Current.LanSharePort}/?key={AppSettings.Current.LanShareToken}";
+    }
+
+    /// <summary>复制完整访问地址（无地址时按钮空转）。</summary>
+    private void LanUrlCopy_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (Server.LanShareProxy.GetLanIPv4Addresses().Count > 0)
+                Clipboard.SetText(LanUrlBox.Text);
+        }
+        catch
+        {
+            // 剪贴板被占用等：静默
+        }
+    }
+
+    /// <summary>端口失焦即保存并重启代理（经 LanShareChanged）；非法输入回显当前值。</summary>
+    private void LanPortBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (int.TryParse(LanPortBox.Text.Trim(), out var port) && port is >= 1024 and <= 65535)
+        {
+            if (port != AppSettings.Current.LanSharePort)
+            {
+                AppSettings.Current.LanSharePort = port;
+                AppSettings.Current.Save();
+                UpdateLanShareUI();
+                LanShareChanged?.Invoke();
+            }
+        }
+        LanPortBox.Text = AppSettings.Current.LanSharePort.ToString();
+    }
+
+    /// <summary>重新生成访问密钥：旧密钥立即失效（代理重启后旧 Cookie 不再放行）。</summary>
+    private void LanTokenRegen_Click(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.LanShareToken = Guid.NewGuid().ToString("N");
+        AppSettings.Current.Save();
+        UpdateLanShareUI();
+        LanShareChanged?.Invoke();
+    }
+
+    /// <summary>添加防火墙放行规则（netsh 提权执行；用户取消 UAC 属正常路径，如实提示）。</summary>
+    private void LanFirewall_Click(object sender, RoutedEventArgs e)
+    {
+        var port = AppSettings.Current.LanSharePort;
+        try
+        {
+            var psi = new ProcessStartInfo("netsh",
+                $"advfirewall firewall add rule name=\"dsh-app LAN Share {port}\" dir=in action=allow protocol=TCP localport={port}")
+            {
+                Verb = "runas",
+                UseShellExecute = true,
+            };
+            Process.Start(psi);
+            LanShareHint.Text = $"已请求管理员授权添加端口 {port} 的入站放行规则（UAC 弹窗选「是」生效）。旧端口规则无害，可在防火墙设置中清理。";
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            LanShareHint.Text = "已取消管理员授权，未添加防火墙规则。若设备连不上，请重试并允许 UAC。";
+        }
+        catch (Exception ex)
+        {
+            LanShareHint.Text = $"添加防火墙规则失败：{ex.Message}";
+        }
     }
 
     // ---------------- 显示（界面缩放） ----------------

@@ -120,6 +120,9 @@ public partial class MainWindow
             _server.Shutdown(); // 必须先停服：运行中的 node 进程持有 bin.js 文件句柄，npm 覆盖安装会 EPERM
             var updated = await _updater.UpdateAsync();
             var restarted = await _server.EnsureServerAsync();
+            // 局域网共享代理重同步（服务端口可能变化；restarted=false 时代理目标已死，同步保持开启状态即可，
+            // 后续"重试"成功路径会再次同步）
+            await SyncLanShareFromSettingsAsync();
 
             if (updated && restarted)
             {

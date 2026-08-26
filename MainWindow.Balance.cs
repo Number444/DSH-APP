@@ -190,10 +190,12 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>托盘悬停文案：标题 + 服务状态（启动中/运行中/已断开）+ 余额段（有值时）。</summary>
+    /// <summary>托盘悬停文案：标题 + 服务状态（启动中/运行中/已断开）+ LAN 共享段（运行时）+ 余额段（有值时）。</summary>
     private void UpdateTrayToolTip()
     {
         var text = $"DeepSeek Harness · {_serviceStateText}";
+        if (_lanShare.IsRunning)
+            text += $" · LAN :{_lanShare.ActivePort}";
         if (_trayBalanceText is not null)
             text += BalanceProviders.IsKimi ? $" — Kimi {_trayBalanceText}" : $" — 余额 ¥{_trayBalanceText}";
         TrayIcon.ToolTipText = text;

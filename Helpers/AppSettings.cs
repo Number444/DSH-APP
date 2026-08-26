@@ -58,6 +58,15 @@ public sealed class AppSettings
     /// <summary>Kimi 手动兜底模式的 API Key（DPAPI 密文 Base64，绝不明文落盘）。</summary>
     public string? EncryptedKimiApiKey { get; set; }
 
+    /// <summary>允许局域网设备通过壳内代理访问 Harness（默认关；开启后由主窗口起 LanShareProxy）。</summary>
+    public bool LanShareEnabled { get; set; }
+
+    /// <summary>局域网共享监听端口（默认 3081；绑定 0.0.0.0，防火墙首次会弹放行提示）。</summary>
+    public int LanSharePort { get; set; } = 3081;
+
+    /// <summary>局域网访问密钥（自动生成，明文存本机配置——仅作 LAN 准入门槛，不承担凭据职能）。</summary>
+    public string LanShareToken { get; set; } = Guid.NewGuid().ToString("N");
+
     public static AppSettings Load()
     {
         try

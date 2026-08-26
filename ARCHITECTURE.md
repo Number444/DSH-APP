@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-26 · 版本 v1.5.1 · 本次更新:余额/额度失败状态可视化（ERROR / NET_ERR 红字分级 + 边沿弹窗 + 未授权一键补授权 + Key 缺失错误文案分层）、启动 dsh 服务禁用自动打开浏览器（--no-open）、凭据读取兼容嵌套格式修复
+> 更新时间:2026-08-26 · 版本 v1.5.1 · 本次更新:余额/额度失败状态可视化（ERROR / NET_ERR 红字分级 + 边沿弹窗 + 未授权一键补授权 + Key 缺失错误文案分层）、启动 dsh 服务禁用自动打开浏览器（--no-open）、凭据读取兼容嵌套格式修复、**局域网共享（LAN Share：壳内 Kestrel+YARP 代理转发 127.0.0.1:3080，token 门禁 + Host/Origin 重写 + 特权写操作拦截 + randomUUID polyfill 注入）**
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -11,7 +11,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 2. 用 WebView2 在独立窗口里渲染 Harness UI
 3. 管理服务器生命周期(关窗默认最小化到托盘,服务继续;菜单「退出APP（保留服务）」只退壳、服务成孤儿待下次启动接管;"退出"才停服,仅停自己拉起的 + 接管验证过的)
 4. 提供启动状态、错误提示与断连检测
-5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚,确认弹窗展示 Release 说明)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、**会话完成通知（壳直连服务事件流检测模型输出完成,弹系统通知,托盘化/页面挂起期间照常）**、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)、设置页维护入口(打开数据目录、页面缓存清理)
+5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚,确认弹窗展示 Release 说明)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、**会话完成通知（壳直连服务事件流检测模型输出完成,弹系统通知,托盘化/页面挂起期间照常）**、**局域网共享（设置页开关,壳内代理让手机/其他电脑经 LAN 访问同一 Harness,双端实时同步,详见模块表「共享层」）**、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)、设置页维护入口(打开数据目录、页面缓存清理)
 
 壳与 Harness 的接触面：`http://127.0.0.1:3080`（HTTP 边界,零侵入）+ 一条 WebSocket 下行事件流（`/api/events.host`，只收不发，供会话完成通知）。
 这也是它对"已安装 dsh 的任意电脑"零适配可用的原因。
@@ -46,8 +46,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化、`App.AppVersion`（壳版本）、启动清理 update 下载残留、**日志截断（`FileLog.TrimIfOversize`，单实例判定后执行）**、**缓存清理执行（`WebView2CacheCleaner.RunPendingCleanup`，WebView2 初始化前）** |
-| 窗口层 | `MainWindow.xaml(.cs)` + **7 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱、`.Notify` 完成通知接线+气泡点击路由） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出APP（保留服务）/退出）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
+| 窗口层 | `MainWindow.xaml(.cs)` + **8 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱、`.Notify` 完成通知接线+气泡点击路由、`.LanShare` 局域网共享接线） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出APP（保留服务）/退出）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
+| 共享层 | `Server/LanShareProxy.cs` | 局域网共享代理：Kestrel 绑 `0.0.0.0:3081` + YARP 反代到 `127.0.0.1:{服务端口}`；token 门禁（`?key=` 首验种 Cookie，常量时间比较）；Host+Origin 重写过 harness trust 围栏；特权写操作 LAN 侧 403（settings/credentials 写、agentPreset 写、host 原生动作、llm.discoverModels）；`crypto.randomUUID` polyfill 注入 HTML（非安全上下文补救）；HTTP/SSE/WebSocket 全透传；启停随设置开关与服务重启重同步，壳退出限时 2s 停服 |
 | 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较（共用 `Helpers/SemVer.cs`），超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
 | 自更新层 | `Server/AppUpdater.cs` | 壳自身（dsh-app.exe）更新:GitHub Releases 检查（tag/资产校验 fail-closed）、**Release 说明存取（`LatestReleaseNotes`，截断 1000 字符供确认弹窗展示）**、流式下载 + 同遍 SHA256、磁盘预检、进度节流、更新器脚本生成（内嵌模板提取）;网络策略直连优先 + 7890 代理兜底重试 |
 | 诊断层 | `Helpers/Diagnostics.cs` + `Views/DiagnosticsWindow` | 环境与运行状态并行采集（node 版本/服务状态/代理/GitHub 连通性/设置项）,敏感边界:绝不含凭据;纯文本一键复制 |
