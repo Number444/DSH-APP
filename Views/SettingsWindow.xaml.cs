@@ -147,9 +147,44 @@ public partial class SettingsWindow : Window
         if (!on) return;
 
         var addr = Server.LanShareProxy.GetLanIPv4Addresses().FirstOrDefault();
-        LanUrlBox.Text = addr is null
-            ? "（未检测到局域网地址，请检查网络连接）"
-            : $"http://{addr}:{AppSettings.Current.LanSharePort}/?key={AppSettings.Current.LanShareToken}";
+        if (addr is null)
+        {
+            LanUrlBox.Text = "（未检测到局域网地址，请检查网络连接）";
+            LanQrBorder.Visibility = Visibility.Collapsed;
+            LanQrHint.Visibility = Visibility.Collapsed;
+            return;
+        }
+        LanUrlBox.Text = $"http://{addr}:{AppSettings.Current.LanSharePort}/?key={AppSettings.Current.LanShareToken}";
+        LanQrBorder.Visibility = Visibility.Visible;
+        LanQrHint.Visibility = Visibility.Visible;
+        LanQrImage.Source = RenderQrCode(LanUrlBox.Text);
+    }
+
+    /// <summary>生成网址二维码（ECC M 级；白底由 XAML Border 提供，PNG 本体透明通道黑块）。
+    /// 每模块像素按实际模块数反推（目标 ≤132px），生成图只被轻微放大而非缩小——
+    /// NearestNeighbor 非整数倍缩小会压碎定位图案，放大则无信息损失。
+    /// OnLoad 缓存 + Freeze：MemoryStream 即用即弃，位图跨线程安全。</summary>
+    private static System.Windows.Media.Imaging.BitmapImage? RenderQrCode(string content)
+    {
+        try
+        {
+            using var gen = new QRCoder.QRCodeGenerator();
+            using var data = gen.CreateQrCode(content, QRCoder.QRCodeGenerator.ECCLevel.M);
+            var ppm = Math.Max(1, 132 / data.ModuleMatrix.Count); // ModuleMatrix 含静区
+            var png = new QRCoder.PngByteQRCode(data).GetGraphic(ppm);
+            using var ms = new MemoryStream(png);
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.StreamSource = ms;
+            bmp.EndInit();
+            bmp.Freeze();
+            return bmp;
+        }
+        catch
+        {
+            return null; // 编码失败仅缺二维码，地址文本仍可用
+        }
     }
 
     /// <summary>复制完整访问地址（无地址时按钮空转）。</summary>

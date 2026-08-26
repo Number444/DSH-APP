@@ -187,6 +187,25 @@
                         BorderThickness="1"
                         Click="LanUrlCopy_Click" />
             </StackPanel>
+            <!-- 网址二维码：白底 + NearestNeighbor 保持像素锐利（扫码容错与缩放模糊负相关） -->
+            <Border x:Name="LanQrBorder"
+                    Margin="0,10,0,0"
+                    Padding="10"
+                    HorizontalAlignment="Left"
+                    Background="White"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <Image x:Name="LanQrImage"
+                       Width="140"
+                       Height="140"
+                       RenderOptions.BitmapScalingMode="NearestNeighbor" />
+            </Border>
+            <TextBlock x:Name="LanQrHint"
+                       Text="手机扫码直达（二维码内容与上方地址一致，含密钥）。"
+                       Margin="0,6,0,0"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextWeakBrush}" />
             <StackPanel Orientation="Horizontal"
                         Margin="0,10,0,0">
                 <TextBlock Text="端口"
