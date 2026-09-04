@@ -1,53 +1,31 @@
-﻿# close-dsh-app.ps1 — 关闭 dsh-app 壳进程（发布流程前置步骤，保持 3080 服务存活）
+# close-dsh-app.ps1 — 关闭 dsh-app 壳进程并腾空 3080（发布流程前置步骤）
 #
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\close-dsh-app.ps1
 #
-# 关键机制：当前 Web GUI 会话（AI 工具通道）运行在 3080 服务上，而该服务由
-# dsh-app 实例拉起。因此本脚本【只强杀 dsh-app.exe 本体，不带 /T】——
-# 它拉起的 dsh web(node) 进程成为孤儿继续占用 3080，保证 GUI 会话不中断；
-# 发布完成后新实例启动会自动接管该服务（身份验证通过，关窗时一并清理）。
-# 若孤儿服务意外退出（管道 EPIPE 等），脚本会尝试独立拉起 dsh web 恢复 3080。
+# v1.7.0（harness v0.1.2-alpha.1 launch token 时代）机制变更：
+#   旧逻辑"只杀壳、留孤儿 node 服务保 GUI 会话"的前提是——新实例能接管旧服务。
+#   launch token 只存在于拉起进程的 stdout，接管已归档：孤儿服务不杀，
+#   新壳启动即撞"端口被占用"错误卡。因此本脚本现在【杀壳 + 杀 3080 上的 dsh 服务】，
+#   把端口腾空交给新壳拉起带 token 的新服务。
+#   代价：当前 Web GUI 会话在发布期间断开，新壳就绪后刷新/重开 GUI 页面即恢复。
 #
-# 退出码：0 = 壳进程已关闭（3080 服务存活或已兜底恢复）；1 = 失败（人工处理）。
+# 安全边界：只杀命令行含 dsh/bin.js 的 node 进程；3080 上是非 dsh 程序时报错退出，
+# 绝不误杀。
+#
+# 退出码：0 = 壳已关闭且 3080 已腾空（或本就无占用）；1 = 失败（人工处理）。
 
 $ErrorActionPreference = 'Continue'
 
-# ---- 定位 node.exe 与 dsh 入口（与 ServerController 解析思路一致） ----
-function Resolve-NodeExe {
-    $cmd = Get-Command node.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    foreach ($c in @("$env:ProgramFiles\nodejs\node.exe", "$env:LOCALAPPDATA\Programs\nodejs\node.exe")) {
-        if (Test-Path $c) { return $c }
-    }
-    return $null
-}
-function Resolve-DshBinJs {
-    foreach ($dir in @("$env:APPDATA\npm", "$env:ProgramFiles\nodejs")) {
-        $bin = Join-Path $dir 'node_modules\@deepseek-ai\dsh\lib\bin.js'
-        if (Test-Path $bin) { return $bin }
-    }
-    return $null
-}
-function Start-DshWebFallback {
-    $node = Resolve-NodeExe
-    $bin = Resolve-DshBinJs
-    if (-not $node -or -not $bin) {
-        Write-Warning '[close-dsh-app] node.exe or dsh bin.js not found; cannot restart 3080 fallback'
-        return $false
-    }
-    Write-Host "[close-dsh-app] restarting dsh web: $node $bin web"
-    Start-Process -FilePath $node -ArgumentList "`"$bin`" web" -WindowStyle Hidden | Out-Null
-    return $true
-}
-
-# ---- 强杀壳进程（不带 /T：保留其拉起的 node 服务，3080 不断） ----
-$proc = Get-Process -Name 'dsh-app' -ErrorAction SilentlyContinue
-if (-not $proc) {
-    Write-Host '[close-dsh-app] no running instance' -ForegroundColor Green
+# ---- 强杀壳进程（所有实例） ----
+$procs = @(Get-Process -Name 'dsh-app' -ErrorAction SilentlyContinue)
+if ($procs.Count -eq 0) {
+    Write-Host '[close-dsh-app] no running shell instance' -ForegroundColor Green
 }
 else {
-    Write-Host "[close-dsh-app] killing shell process PID $($proc.Id) (no /T: keep its node service alive on 3080)..."
-    taskkill /PID $proc.Id /F | Out-Null
+    foreach ($p in $procs) {
+        Write-Host "[close-dsh-app] killing shell process PID $($p.Id)..."
+        taskkill /PID $p.Id /F | Out-Null
+    }
     Start-Sleep -Seconds 2
     if (Get-Process -Name 'dsh-app' -ErrorAction SilentlyContinue) {
         Write-Error '[close-dsh-app] shell process still running; handle manually'
@@ -56,22 +34,28 @@ else {
     Write-Host '[close-dsh-app] shell process closed OK' -ForegroundColor Green
 }
 
-# ---- 检查 3080：存活则 GUI 通道保持；死亡则兜底拉起 ----
-Start-Sleep -Seconds 2
-$listening = netstat -ano | Select-String ':3080' | Select-String 'LISTENING'
-if ($listening) {
-    Write-Host '[close-dsh-app] port 3080 still alive (GUI session uninterrupted) OK' -ForegroundColor Green
+# ---- 腾空 3080：只杀 dsh 服务（身份验证：命令行含 dsh\bin.js） ----
+Start-Sleep -Seconds 1
+$line = netstat -ano | Select-String 'LISTENING' | Select-String ':3080\s' | Select-Object -First 1
+if (-not $line) {
+    Write-Host '[close-dsh-app] port 3080 already free OK' -ForegroundColor Green
+    exit 0
 }
-else {
-    Write-Warning '[close-dsh-app] port 3080 is down (service died with the shell); starting fallback dsh web...'
-    if (Start-DshWebFallback) {
-        Start-Sleep -Seconds 3
-        if (netstat -ano | Select-String ':3080' | Select-String 'LISTENING') {
-            Write-Host '[close-dsh-app] fallback dsh web up on 3080 OK' -ForegroundColor Green
-        }
-        else {
-            Write-Warning '[close-dsh-app] fallback start pending or failed; continuing (publish will still run)'
-        }
+
+$svcPid = [int](($line -split '\s+')[-1])
+$cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$svcPid" -ErrorAction SilentlyContinue).CommandLine
+if ($cmd -and $cmd -match 'dsh' -and $cmd -match 'bin\.js') {
+    Write-Host "[close-dsh-app] stopping dsh service PID $svcPid (token era: new shell cannot adopt, port must be freed)..."
+    taskkill /PID $svcPid /F | Out-Null
+    Start-Sleep -Seconds 1
+    if (netstat -ano | Select-String 'LISTENING' | Select-String ':3080\s') {
+        Write-Error '[close-dsh-app] port 3080 still occupied after kill; handle manually'
+        exit 1
     }
+    Write-Host '[close-dsh-app] dsh service stopped, port 3080 free OK' -ForegroundColor Green
+    Write-Host '[close-dsh-app] NOTE: Web GUI session is down until the new shell starts a fresh service.' -ForegroundColor Yellow
+    exit 0
 }
-exit 0
+
+Write-Error "[close-dsh-app] port 3080 is held by a NON-dsh process (PID $svcPid, cmd: $cmd); refusing to kill"
+exit 1

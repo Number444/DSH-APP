@@ -27,9 +27,9 @@ powershell -ExecutionPolicy Bypass -File scripts\release-publish.ps1
 
 **脚本做什么**（全程无人值守，桌面弹出 GUI 进度窗口：步骤日志 / 状态 / 进度条 / 结果框）：
 1. 检查未提交改动（仅警告不阻断）
-2. 关闭壳进程（close-dsh-app.ps1：优雅关闭优先，**保留其 node 服务——3080 不断**；5 秒未响应才强杀兜底）
+2. 关闭壳进程并腾空 3080（close-dsh-app.ps1：杀壳 + 杀 3080 上的 dsh 服务——v1.7.0 launch token 时代新壳无法接管旧服务，孤儿服务必须杀掉腾端口；**Web GUI 会话随之中断，新壳就绪后刷新/重开页面恢复**；只杀命令行含 dsh/bin.js 的进程，非 dsh 占用则报错绝不误杀）
 3. `dotnet publish` 单 exe（self-contained，产物 `bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe`）
-4. 启动产物 → 轮询 3080 就绪（≤30s）→ **交付：产物窗口保持打开**（最新版即当前窗口，接管 3080）
+4. 启动产物 → 轮询 3080 就绪（≤30s；token 时代裸请求 401 即视为就绪——服务活着且鉴权生效）→ **交付：产物窗口保持打开**（最新版即当前窗口，自带 token 的新服务）
 
 **规范约束**：
 - 第二步**一律执行此脚本**（含 GUI 进度窗口与产物交付），不手动逐条敲 publish 命令

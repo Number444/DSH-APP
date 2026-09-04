@@ -1,7 +1,8 @@
-﻿# release-publish.ps1 — 一键发布（完整发布流程第二步自动化，带 GUI 进度窗口）
+# release-publish.ps1 — 一键发布（完整发布流程第二步自动化，带 GUI 进度窗口）
 #
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\release-publish.ps1
-# 流程：关闭壳进程（保持 3080 服务存活，GUI 会话不中断）→ dotnet publish 单 exe
+# 流程：关闭壳进程并腾空 3080（v1.7.0 token 时代：新壳无法接管旧服务，必须停服；
+#       Web GUI 会话在发布期间断开，新壳就绪后刷新/重开 GUI 页面即恢复）→ dotnet publish 单 exe
 #       → 启动交付（就绪确认）。全程无人值守；桌面弹出进度窗口，
 #       实时显示"执行到哪一步 / 每步结果 / 进度条"，结束弹出成功/失败结果框。
 # 前提：第一步 commit 已完成（脚本检测未提交改动仅警告不阻断）。
@@ -78,8 +79,8 @@ try {
         Add-Log "[warn] uncommitted changes (publish should correspond to committed code):`n$dirty"
     }
 
-    # ② 关闭壳进程（保留其 node 服务：3080 不断，GUI 会话不中断）
-    Add-Log '--- step 1/3: closing shell process (keeping 3080 alive) ---'
+    # ② 关闭壳进程并腾空 3080（token 时代：孤儿服务不杀新壳起不来；GUI 会话随之中断）
+    Add-Log '--- step 1/3: closing shell and freeing port 3080 (GUI session will drop until new shell is up) ---'
     Set-Progress 8
     & (Join-Path $PSScriptRoot 'close-dsh-app.ps1') 2>&1 | ForEach-Object { Add-Log $_ }
     if ($LASTEXITCODE -ne 0) { throw 'failed to close shell process; aborting' }
@@ -98,7 +99,7 @@ try {
     Add-Log "artifact ready: $exe (${size}MB)"
     Set-Progress 60
 
-    # ④ 启动产物：就绪即交付（不关窗！——接管模式下关窗会杀掉承载 GUI 会话的 3080 服务）
+    # ④ 启动产物：就绪即交付（新壳会自己拉起带 launch token 的全新 dsh 服务）
     Add-Log '--- step 3/3: starting artifact and waiting 3080 ready ---'
     Set-Progress 70
     Start-Process -FilePath $exe | Out-Null
@@ -111,7 +112,11 @@ try {
             $r = Invoke-WebRequest -Uri 'http://127.0.0.1:3080' -TimeoutSec 2 -UseBasicParsing
             if ($r.StatusCode -lt 500) { $ready = $true; break }
         }
-        catch { }
+        catch {
+            # token 时代裸请求被 401 拒绝 = 服务活着且鉴权生效，视为就绪（4xx 同理）
+            $resp = $_.Exception.Response
+            if ($resp -and [int]$resp.StatusCode -lt 500) { $ready = $true; break }
+        }
     }
     if (-not $ready) { throw 'startup failed: 3080 not ready within 30s' }
     Set-Progress 95
@@ -122,7 +127,7 @@ try {
     Start-Sleep -Milliseconds 400
     $form.Close()
     [System.Windows.Forms.MessageBox]::Show(
-        "发布成功：$exe（${size}MB）`n`n当前窗口为最新版本。`n第三步 push 由主人确定。",
+        "发布成功：$exe（${size}MB）`n`n当前窗口为最新版本（自带 launch token 的新服务已就绪）。`nWeb GUI 页面刷新/重开即可恢复会话。`n第三步 push 由主人确定。",
         'dsh-app 发布完成', 'OK', 'Information') | Out-Null
     exit 0
 }
