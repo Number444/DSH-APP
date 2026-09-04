@@ -1,4 +1,4 @@
-# close-dsh-app.ps1 — 关闭 dsh-app 壳进程并腾空 3080（发布流程前置步骤）
+﻿# close-dsh-app.ps1 — 关闭 dsh-app 壳进程并腾空 3080（发布流程前置步骤）
 #
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\close-dsh-app.ps1
 #

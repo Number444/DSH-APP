@@ -1,4 +1,4 @@
-# release-publish.ps1 — 一键发布（完整发布流程第二步自动化，带 GUI 进度窗口）
+﻿# release-publish.ps1 — 一键发布（完整发布流程第二步自动化，带 GUI 进度窗口）
 #
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\release-publish.ps1
 # 流程：关闭壳进程并腾空 3080（v1.7.0 token 时代：新壳无法接管旧服务，必须停服；
