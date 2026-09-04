@@ -55,9 +55,6 @@ public partial class MainWindow : Window
     private Views.UpdateProgressWindow? _checkProgress;
     /// <summary>托盘"退出"请求：跳过最小化到托盘拦截，真正退出。</summary>
     private bool _trayExitRequested;
-    /// <summary>菜单"退出APP（保留服务）"：退出壳但不停止后台 dsh 服务（OnClosed 跳过 Shutdown，
-    /// 仅 Dispose 释放进程句柄；服务成孤儿，下次启动按既有探测逻辑重新接管）。</summary>
-    private bool _exitKeepServer;
     /// <summary>首次隐藏到托盘时是否已提示。</summary>
     private bool _trayHintShown;
     /// <summary>余额是否高于告警阈值（初始视为高：首次刷新低于阈值即告警；恢复后复位）。</summary>
@@ -209,10 +206,18 @@ public partial class MainWindow : Window
             // 完成通知监听不依赖页面加载：服务就绪即启动（WebView2 挂起/崩溃期间照样通知）
             StartCompletionNotifyIfEnabled();
 
-            // 局域网共享：设置开启时随服务就绪启动代理（目标端口 = 实际服务端口）
-            await SyncLanShareFromSettingsAsync();
+            // 局域网共享：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
+            // await SyncLanShareFromSettingsAsync();
 
-            WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
+            if (_server.AuthenticatedUrl is null)
+            {
+                ShowError("无法获取访问令牌",
+                    "harness 服务已启动，但壳未能从启动输出中解析到带 token 的 URL。\n" +
+                    "请查看日志确认 harness 版本与输出格式。",
+                    allowRetry: true);
+                return;
+            }
+            WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl);
         }
         catch (Exception ex)
         {
@@ -419,12 +424,17 @@ public partial class MainWindow : Window
         ShowServiceLostError("dsh 服务进程意外退出。");
     }
 
-    /// <summary>接管模式下页面加载完成后启动心跳（自家模式由进程 Exited 事件覆盖）。</summary>
+    /// <summary>
+    /// 页面加载完成后的心跳启动入口。
+    /// （已归档：心跳原本服务于"接管外部 dsh"场景——进程不归属本壳时只能靠 HTTP 探测感知死亡；
+    /// 接管功能随 harness v0.1.2-alpha.1 launch token 机制归档后，IsSelfStarted 恒为 true，
+    /// 自家进程的死亡由 _server.ServerDied（Process.Exited）覆盖，无需心跳。）
+    /// </summary>
     private void StartHeartbeatIfAdopted()
     {
         _heartbeatMisses = 0;
-        if (!_server.IsSelfStarted)
-            _heartbeat.Start();
+        // if (!_server.IsSelfStarted)
+        //     _heartbeat.Start();
     }
 
     private async void OnHeartbeatTick(object? sender, EventArgs e)
@@ -606,15 +616,22 @@ public partial class MainWindow : Window
             }
             // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
             StartCompletionNotifyIfEnabled();
-            // 局域网共享代理重同步（服务端口可能变化）
-            await SyncLanShareFromSettingsAsync();
+            // 局域网共享代理重同步：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
+            // await SyncLanShareFromSettingsAsync();
             if (WebView.CoreWebView2 is null)
             {
                 // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
                 ShowError("页面内核未就绪", "WebView2 未能初始化，请重启应用；若反复出现请检查 WebView2 Runtime。", allowRetry: false);
                 return;
             }
-            WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
+            if (_server.AuthenticatedUrl is null)
+            {
+                ShowError("无法获取访问令牌",
+                    "harness 服务已启动，但壳未能从启动输出中解析到带 token 的 URL。\n请查看日志。",
+                    allowRetry: true);
+                return;
+            }
+            WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl);
         }
         catch (Exception ex)
         {
@@ -665,7 +682,9 @@ public partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo($"http://127.0.0.1:{_server.Port}") { UseShellExecute = true });
+            // 带一次性 token 的 URL：harness v0.1.2-alpha.1 起裸 URL 会被 401 拒绝
+            var url = _server.AuthenticatedUrl ?? $"http://127.0.0.1:{_server.Port}";
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -690,15 +709,22 @@ public partial class MainWindow : Window
             }
             // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
             StartCompletionNotifyIfEnabled();
-            // 局域网共享代理重同步（服务端口可能变化）
-            await SyncLanShareFromSettingsAsync();
+            // 局域网共享代理重同步：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
+            // await SyncLanShareFromSettingsAsync();
             if (WebView.CoreWebView2 is null)
             {
                 // Runtime 缺失等场景：WebView2 从未初始化成功，直接 Navigate 会 NRE 报天书
                 ShowError("页面内核未就绪", "WebView2 未能初始化，请重启应用；若反复出现请检查 WebView2 Runtime。", allowRetry: false);
                 return;
             }
-            WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
+            if (_server.AuthenticatedUrl is null)
+            {
+                ShowError("无法获取访问令牌",
+                    "harness 服务已启动，但壳未能从启动输出中解析到带 token 的 URL。\n请查看日志。",
+                    allowRetry: true);
+                return;
+            }
+            WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl);
         }
         catch (Exception ex)
         {
@@ -873,17 +899,8 @@ public partial class MainWindow : Window
     {
         HideCheckProgress(); // 主窗口关闭：进度窗一并关闭，防残留
         ThemeManager.ThemeChanged -= OnThemeChangedApplyDwm; // 静态事件解除订阅，防窗口实例被挂住
-        // "退出APP（保留服务）"：跳过 Shutdown，服务成孤儿继续跑（下次启动探测接管）；
-        // 其余退出路径（托盘"退出"/关窗直退/强制退出/自更新重启）照旧停服
-        if (_exitKeepServer)
-        {
-            AppendLog("退出APP：保留后台 dsh 服务运行");
-            _exitKeepServer = false; // 一次性语义：防御性复位（窗口关闭即销毁，此处仅为未来复用不留残留）
-        }
-        else
-        {
-            _server.Shutdown();
-        }
+        // 退出即停服：所有退出路径（托盘"退出"/关窗直退/强制退出/自更新重启）统一调 Shutdown
+        _server.Shutdown();
         _server.Dispose();
         _lanShare.Dispose(); // 停 LAN 共享代理（限 2s，不拖退出）
         _balance.Stop();

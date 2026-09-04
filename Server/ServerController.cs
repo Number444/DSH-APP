@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 
 namespace dsh_app.Server;
 
@@ -32,6 +33,10 @@ public sealed class ServerController : IDisposable
     private const int ReadyTimeoutMs = 30_000;
     private const int PollIntervalMs = 500;
 
+    /// <summary>harness 就绪时打印的带 token URL 行：`dsh web: http://127.0.0.1:3080/?token=xxx`。</summary>
+    private static readonly Regex AuthenticatedUrlPattern =
+        new(@"dsh web:\s*(https?://\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(1) };
     private Process? _serverProcess;
     private bool _selfStarted;
@@ -41,22 +46,30 @@ public sealed class ServerController : IDisposable
     /// <summary>EnsureServerAsync 串行化：启动期间点"重启/重试"不得并发二次拉起（防双进程、句柄覆盖）。</summary>
     private readonly SemaphoreSlim _ensureLock = new(1, 1);
 
-    /// <summary>接管的外部 dsh 进程 PID（0 = 无接管）。</summary>
-    private int _adoptedPid;
-    /// <summary>接管进程是否已通过身份验证（确认为 dsh，而非其他占用端口的程序）。</summary>
-    private bool _adoptedIsDsh;
+    // ────────── 已归档：远程接管外部 dsh（harness v0.1.2-alpha.1 起 launch token 失效）──────────
+    // /// <summary>接管的外部 dsh 进程 PID（0 = 无接管）。</summary>
+    // private int _adoptedPid;
+    // /// <summary>接管进程是否已通过身份验证（确认为 dsh，而非其他占用端口的程序）。</summary>
+    // private bool _adoptedIsDsh;
 
     /// <summary>当前使用的端口(默认 3080)。</summary>
     public int Port { get; private set; } = DefaultPort;
+
+    /// <summary>
+    /// 带一次性 launch token 的完整入口 URL（harness v0.1.2-alpha.1+）。
+    /// 从 dsh web 子进程 stdout 的 `dsh web: &lt;URL&gt;` 行抓取；未抓到时为 null。
+    /// 进程每次重启 token 都会轮换，故本字段在每次 EnsureServerAsync 启动时清空重建。
+    /// </summary>
+    public string? AuthenticatedUrl { get; private set; }
 
     /// <summary>服务器是否由本应用拉起(决定退出时是否清理)。</summary>
     public bool IsSelfStarted => _selfStarted;
 
     /// <summary>
-    /// 当前端口服务是否由本应用管理：自家拉起，或接管且已通过 dsh 身份验证。
-    /// Harness 更新等需要"能停服"的操作以此为前置条件（非 dsh 占用端口时拒绝）。
+    /// 当前端口服务是否由本应用管理。归档接管后等价于 IsSelfStarted
+    /// （保留该属性供 HarnessUpdater 等调用方使用，签名不变）。
     /// </summary>
-    public bool IsManaged => _selfStarted || _adoptedIsDsh;
+    public bool IsManaged => _selfStarted;
 
     /// <summary>运行日志回调，供 UI 状态区与日志文件使用。</summary>
     public event Action<string>? Log;
@@ -104,18 +117,25 @@ public sealed class ServerController : IDisposable
     {
         StartupErrorHint = null;
         _ready = false;
+        AuthenticatedUrl = null; // 新一轮启动：清空旧 token（per-process，进程重启即换）
 
-        // ① 探测已有服务（async，避免 UI 冻结）
-        ReportStep(ServerStep.Detect, StepStatus.Running, $"扫描 {DefaultPort}~{PortScanMax}…");
-        var existing = await DetectRunningServerAsync();
-        if (existing > 0)
+        // ① 端口占用探测（已归档"远程接管外部 dsh"：harness v0.1.2-alpha.1 起
+        //    launch token 仅存在于拉起进程的 stdout，外部进程无法取得 → 任何占用都视为冲突）
+        ReportStep(ServerStep.Detect, StepStatus.Running, $"检测端口 {DefaultPort} 是否被占用…");
+        if (await IsHttpAliveAsync(DefaultPort))
         {
-            _selfStarted = false;
-            _ready = true;
-            ReportStep(ServerStep.Detect, StepStatus.Done, $"http://127.0.0.1:{existing} 已在运行");
-            return true;
+            ReportStep(ServerStep.Detect, StepStatus.Failed, $"端口 {DefaultPort} 已被占用");
+            StartupErrorHint =
+                $"端口 {DefaultPort} 已被其他程序占用。\n\n" +
+                "自 harness v0.1.2-alpha.1 起，每次启动需要一次性 token 鉴权，" +
+                "壳只能拉起自己启动的 dsh 进程才能拿到 token，因此无法接管已在运行的服务。\n\n" +
+                "解决方法：\n" +
+                "1. 关闭占用该端口的程序（可在任务管理器或 `netstat -ano | findstr :3080` 查 PID）\n" +
+                "2. 重新启动本程序";
+            WriteLog($"端口 {DefaultPort} 已被占用，拒绝启动（已归档：不再接管外部 dsh）");
+            return false;
         }
-        ReportStep(ServerStep.Detect, StepStatus.Done, "无已有服务，走本地启动");
+        ReportStep(ServerStep.Detect, StepStatus.Done, "端口空闲，走本地启动");
 
         // ② 定位运行环境（node.exe 与 dsh 入口，不依赖进程 PATH）
         _selfStarted = true;
@@ -148,16 +168,16 @@ public sealed class ServerController : IDisposable
         }
         ReportStep(ServerStep.Launch, StepStatus.Done, $"PID {_serverProcess!.Id}");
 
-        // ④ 轮询就绪
+        // ④ 轮询就绪（IsHttpAlive + 已从 stdout 抓到 AuthenticatedUrl 双条件）
         ReportStep(ServerStep.WaitReady, StepStatus.Running, $"轮询 http://127.0.0.1:{Port}");
         var deadline = DateTime.UtcNow.AddMilliseconds(ReadyTimeoutMs);
         while (DateTime.UtcNow < deadline)
         {
-            if (await IsHttpAliveAsync(Port))
+            if (await IsHttpAliveAsync(Port) && AuthenticatedUrl is not null)
             {
                 _ready = true;
                 ReportStep(ServerStep.WaitReady, StepStatus.Done, $"http://127.0.0.1:{Port} 就绪");
-                WriteLog($"dsh 服务就绪：http://127.0.0.1:{Port}");
+                WriteLog($"dsh 服务就绪：{AuthenticatedUrl}");
                 return true;
             }
 
@@ -171,93 +191,112 @@ public sealed class ServerController : IDisposable
             await Task.Delay(PollIntervalMs);
         }
 
-        ReportStep(ServerStep.WaitReady, StepStatus.Failed, "30s 超时");
-        WriteLog("等待 dsh 服务就绪超时(30s)，请查看日志");
+        // 超时分两类：HTTP 不通 vs HTTP 通但 stdout 没抓到 token 行（harness 输出格式变化）
+        if (await IsHttpAliveAsync(Port))
+        {
+            ReportStep(ServerStep.WaitReady, StepStatus.Failed, "未从 stdout 抓取到带 token 的 URL");
+            WriteLog("已检测到 HTTP 服务，但 30s 内未从 stdout 抓取到 `dsh web: <URL>` 行。" +
+                     "harness 输出格式可能已变更，请更新 dsh-app 或查阅日志。");
+            StartupErrorHint =
+                "无法获取访问令牌。\n\n" +
+                "harness 服务已启动，但壳未能从启动输出中解析到带 token 的 URL。\n" +
+                "这可能是 harness 输出格式变更导致的兼容性问题。\n\n" +
+                "请尝试：\n" +
+                "1. 在终端手动执行 `dsh web`，观察输出中是否有 `dsh web: http://...` 行\n" +
+                "2. 如有该行但壳仍报错，请反馈给壳作者";
+        }
+        else
+        {
+            ReportStep(ServerStep.WaitReady, StepStatus.Failed, "30s 超时");
+            WriteLog("等待 dsh 服务就绪超时(30s)，请查看日志");
+        }
         return false;
     }
 
-    /// <summary>
-    /// 在 3080~3090 范围内探测已运行的 dsh HTTP 服务（并发，最坏 ~1s 而非串行 ~11s）。
-    /// 命中时记录监听进程 PID 并做身份验证（区分 dsh 与占用端口的其他程序）。
-    /// 返回存活的最小端口；无则返回 -1。
-    /// </summary>
-    private async Task<int> DetectRunningServerAsync()
-    {
-        var ports = Enumerable.Range(DefaultPort, PortScanMax - DefaultPort + 1).ToArray();
-        var alive = await Task.WhenAll(ports.Select(p => IsHttpAliveAsync(p)));
-        var hit = -1;
-        for (var i = 0; i < ports.Length; i++)
-        {
-            if (alive[i]) { hit = ports[i]; break; }
-        }
-        if (hit < 0) return -1;
-
-        Port = hit;
-        _adoptedPid = await GetListeningPidAsync(hit);
-        _adoptedIsDsh = await IsDshProcessAsync(_adoptedPid);
-        WriteLog(_adoptedIsDsh
-            ? $"检测到已在运行的 dsh 服务：http://127.0.0.1:{hit} (PID {_adoptedPid}，确认为 dsh，关窗时一并停止)"
-            : $"检测到端口 {hit} 已被其他程序占用 (PID {_adoptedPid})，非 dsh，关窗时不清理");
-        return hit;
-    }
+    // ────────── 已归档：远程接管外部 dsh（保留供回溯）──────────
+    // /// <summary>
+    // /// 在 3080~3090 范围内探测已运行的 dsh HTTP 服务（并发，最坏 ~1s 而非串行 ~11s）。
+    // /// 命中时记录监听进程 PID 并做身份验证（区分 dsh 与占用端口的其他程序）。
+    // /// 返回存活的最小端口；无则返回 -1。
+    // /// </summary>
+    // private async Task<int> DetectRunningServerAsync()
+    // {
+    //     var ports = Enumerable.Range(DefaultPort, PortScanMax - DefaultPort + 1).ToArray();
+    //     var alive = await Task.WhenAll(ports.Select(p => IsHttpAliveAsync(p)));
+    //     var hit = -1;
+    //     for (var i = 0; i < ports.Length; i++)
+    //     {
+    //         if (alive[i]) { hit = ports[i]; break; }
+    //     }
+    //     if (hit < 0) return -1;
+    //
+    //     Port = hit;
+    //     _adoptedPid = await GetListeningPidAsync(hit);
+    //     _adoptedIsDsh = await IsDshProcessAsync(_adoptedPid);
+    //     WriteLog(_adoptedIsDsh
+    //         ? $"检测到已在运行的 dsh 服务：http://127.0.0.1:{hit} (PID {_adoptedPid}，确认为 dsh，关窗时一并停止)"
+    //         : $"检测到端口 {hit} 已被其他程序占用 (PID {_adoptedPid})，非 dsh，关窗时不清理");
+    //     return hit;
+    // }
 
     /// <summary>轻量存活检查（心跳用）：当前端口上的 HTTP 服务是否仍在响应。</summary>
     public Task<bool> CheckAliveAsync() => IsHttpAliveAsync(Port);
 
-    /// <summary>通过 netstat 解析监听指定端口的进程 PID（0 = 未找到）。</summary>
-    private static async Task<int> GetListeningPidAsync(int port)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo("netstat", "-ano")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-            };
-            using var proc = Process.Start(psi)!;
-            var output = await proc.StandardOutput.ReadToEndAsync();
-            await proc.WaitForExitAsync();
-            foreach (var line in output.Split('\n'))
-            {
-                if (!line.Contains($":{port}") || !line.Contains("LISTENING", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length > 0 && int.TryParse(parts[^1], out var pid))
-                    return pid;
-            }
-        }
-        catch
-        {
-            // 解析失败视为未找到
-        }
-        return 0;
-    }
-
-    /// <summary>通过进程命令行验证 PID 是否为 dsh 服务（命令行含 dsh / bin.js 特征）。</summary>
-    private static async Task<bool> IsDshProcessAsync(int pid)
-    {
-        if (pid <= 0) return false;
-        try
-        {
-            var psi = new ProcessStartInfo("powershell",
-                $"-NoProfile -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine\"")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-            };
-            using var proc = Process.Start(psi)!;
-            var cmd = await proc.StandardOutput.ReadToEndAsync();
-            await proc.WaitForExitAsync();
-            return cmd.Contains("dsh", StringComparison.OrdinalIgnoreCase)
-                || cmd.Contains("bin.js", StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    // ────────── 已归档：远程接管辅助方法（随 DetectRunningServerAsync 一并归档）──────────
+    // /// <summary>通过 netstat 解析监听指定端口的进程 PID（0 = 未找到）。</summary>
+    // private static async Task<int> GetListeningPidAsync(int port)
+    // {
+    //     try
+    //     {
+    //         var psi = new ProcessStartInfo("netstat", "-ano")
+    //         {
+    //             UseShellExecute = false,
+    //             CreateNoWindow = true,
+    //             RedirectStandardOutput = true,
+    //         };
+    //         using var proc = Process.Start(psi)!;
+    //         var output = await proc.StandardOutput.ReadToEndAsync();
+    //         await proc.WaitForExitAsync();
+    //         foreach (var line in output.Split('\n'))
+    //         {
+    //             if (!line.Contains($":{port}") || !line.Contains("LISTENING", StringComparison.OrdinalIgnoreCase))
+    //                 continue;
+    //             var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    //             if (parts.Length > 0 && int.TryParse(parts[^1], out var pid))
+    //                 return pid;
+    //         }
+    //     }
+    //     catch
+    //     {
+    //         // 解析失败视为未找到
+    //     }
+    //     return 0;
+    // }
+    //
+    // /// <summary>通过进程命令行验证 PID 是否为 dsh 服务（命令行含 dsh / bin.js 特征）。</summary>
+    // private static async Task<bool> IsDshProcessAsync(int pid)
+    // {
+    //     if (pid <= 0) return false;
+    //     try
+    //     {
+    //         var psi = new ProcessStartInfo("powershell",
+    //             $"-NoProfile -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine\"")
+    //         {
+    //             UseShellExecute = false,
+    //             CreateNoWindow = true,
+    //             RedirectStandardOutput = true,
+    //         };
+    //         using var proc = Process.Start(psi)!;
+    //         var cmd = await proc.StandardOutput.ReadToEndAsync();
+    //         await proc.WaitForExitAsync();
+    //         return cmd.Contains("dsh", StringComparison.OrdinalIgnoreCase)
+    //             || cmd.Contains("bin.js", StringComparison.OrdinalIgnoreCase);
+    //     }
+    //     catch
+    //     {
+    //         return false;
+    //     }
+    // }
 
     private bool TryStartServer(string nodeExe, string dshBin)
     {
@@ -313,7 +352,19 @@ public sealed class ServerController : IDisposable
 
             _serverProcess.OutputDataReceived += (_, e) =>
             {
-                if (!string.IsNullOrEmpty(e.Data)) WriteLog(e.Data);
+                if (string.IsNullOrEmpty(e.Data)) return;
+                WriteLog(e.Data);
+                // 抓取 harness 就绪时打印的带 token URL 行：`dsh web: http://127.0.0.1:3080/?token=xxx`
+                // （v0.1.2-alpha.1 起，launch token per-process，必须从这里取）
+                if (AuthenticatedUrl is null)
+                {
+                    var m = AuthenticatedUrlPattern.Match(e.Data);
+                    if (m.Success)
+                    {
+                        AuthenticatedUrl = m.Groups[1].Value;
+                        WriteLog("已抓取带 token 的入口 URL");
+                    }
+                }
             };
             _serverProcess.ErrorDataReceived += (_, e) =>
             {
@@ -431,8 +482,8 @@ public sealed class ServerController : IDisposable
     }
 
     /// <summary>
-    /// 关闭应用时调用：停止本应用拉起的 dsh 进程；
-    /// 若端口服务是外部启动的，仅当通过身份验证（确认为 dsh）才一并停止，其他程序绝不误杀。
+    /// 关闭应用时调用：停止本应用拉起的 dsh 进程。
+    /// （已归档：远程接管外部 dsh 已随 launch token 机制失效，不再清理外部进程）
     /// </summary>
     public void Shutdown()
     {
@@ -467,16 +518,16 @@ public sealed class ServerController : IDisposable
             }
         }
 
-        // 接管的外部 dsh（已验证）：一并停止，避免"关不掉"的残留
-        if (_adoptedPid > 0 && _adoptedIsDsh)
-        {
-            WriteLog($"关闭应用，停止接管的外部 dsh 服务 (PID {_adoptedPid})…");
-            KillPidTree(_adoptedPid);
-        }
+        // ────── 已归档：接管 dsh 清理 ──────
+        // if (_adoptedPid > 0 && _adoptedIsDsh)
+        // {
+        //     WriteLog($"关闭应用，停止接管的外部 dsh 服务 (PID {_adoptedPid})…");
+        //     KillPidTree(_adoptedPid);
+        // }
 
         _selfStarted = false;
-        _adoptedPid = 0;
-        _adoptedIsDsh = false;
+        // _adoptedPid = 0;
+        // _adoptedIsDsh = false;
     }
 
     /// <summary>安全读取进程退出码（进程句柄可能已失效）。</summary>

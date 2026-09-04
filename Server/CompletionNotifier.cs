@@ -1,4 +1,6 @@
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text.Json;
 
@@ -49,6 +51,13 @@ public sealed class CompletionNotifier : IDisposable
     /// <summary>已停止标志（Stop/Dispose 后置真；在途帧回调时忽略）。Volatile 访问（同 BalanceMonitor 惯例）。</summary>
     private bool _stopped = true;
     private int _port;
+    /// <summary>
+    /// 带一次性 launch token 的入口 URL（harness v0.1.2-alpha.1+）。
+    /// 握手前先用它 GET 一次换签名 cookie，之后 WebSocket 握手带 cookie 才能过鉴权。
+    /// </summary>
+    private string? _authenticatedUrl;
+    /// <summary>token→cookie 交换后的 CookieContainer（含 dsh-auth-* 签名 cookie），供 WebSocket 握手复用。</summary>
+    private CookieContainer? _cookies;
 
     /// <summary>日志（事件流无凭据；异常消息不含敏感内容）。</summary>
     public event Action<string>? Log;
@@ -59,8 +68,11 @@ public sealed class CompletionNotifier : IDisposable
     /// </summary>
     public event Action<string, string?>? SessionFinished;
 
-    /// <summary>启动事件流监听。幂等：已启动不重复。</summary>
-    public void Start(int port)
+    /// <summary>
+    /// 启动事件流监听。幂等：已启动不重复。
+    /// harness v0.1.2-alpha.1 起必须传入带 token 的入口 URL（用于握手前完成 token→cookie 交换）。
+    /// </summary>
+    public void Start(int port, string? authenticatedUrl)
     {
         if (Interlocked.Exchange(ref _started, 1) != 0)
             return;
@@ -74,6 +86,8 @@ public sealed class CompletionNotifier : IDisposable
             }
             Volatile.Write(ref _stopped, false);
             _port = port;
+            _authenticatedUrl = authenticatedUrl;
+            _cookies = null; // 新一轮启动清空旧 cookie（token 已换）
             _lastRunning.Clear();
             _pendingError.Clear();
             _muted.Clear();
@@ -146,9 +160,20 @@ public sealed class CompletionNotifier : IDisposable
     private async Task<bool> ConnectAndReceiveAsync(CancellationToken ct)
     {
         var connectedAt = Environment.TickCount64;
+
+        // ① 先确保已用 launch token 换到签名 cookie（harness v0.1.2-alpha.1+）
+        if (!await EnsureCookiesAsync(ct).ConfigureAwait(false))
+            throw new InvalidOperationException("token→cookie 交换失败（harness 未就绪或 token 已失效）");
+
         using var ws = new ClientWebSocket();
         // 本机回环：显式禁用系统代理（Clash 全局代理可能劫持握手，loopback 也不保证绕过）
         ws.Options.Proxy = null;
+        // 携带签名 cookie 握手（harness requestRejection 对无 cookie 一律 401）
+        lock (_sync)
+        {
+            if (_cookies is not null)
+                ws.Options.Cookies = _cookies;
+        }
 
         lock (_sync)
         {
@@ -184,6 +209,57 @@ public sealed class CompletionNotifier : IDisposable
             {
                 if (ReferenceEquals(_socket, ws)) _socket = null;
             }
+        }
+    }
+
+    /// <summary>
+    /// 用 launch token 完成 token→cookie 交换：GET AuthenticatedUrl → harness authorizeIndex
+    /// 验证 token 后 Set-Cookie（dsh-auth-*，HttpOnly+SameSite=Strict）+ 302 重定向到干净 `/`。
+    /// CookieContainer 自动捕获 Set-Cookie。已持有 cookie 时跳过（幂等）。
+    /// </summary>
+    private async Task<bool> EnsureCookiesAsync(CancellationToken ct)
+    {
+        lock (_sync)
+        {
+            if (_cookies is not null) return true;
+        }
+
+        string? url;
+        lock (_sync) url = _authenticatedUrl;
+        if (string.IsNullOrEmpty(url))
+        {
+            Log?.Invoke("完成通知事件流：未拿到带 token 的入口 URL，跳过 cookie 交换");
+            return false;
+        }
+
+        try
+        {
+            var container = new CookieContainer();
+            using var handler = new HttpClientHandler
+            {
+                CookieContainer = container,
+                AllowAutoRedirect = false, // 302 即可，不必跟随（关键是 Set-Cookie 落进 container）
+                UseProxy = false,          // 与 WS 一致：loopback 不走系统代理
+            };
+            using var http = new HttpClient(handler) { Timeout = ConnectTimeout };
+            using var resp = await http.GetAsync(url, ct).ConfigureAwait(false);
+            // harness 应回 302 + Set-Cookie；其他 2xx/3xx 也视为成功（兼容未来变化）
+            if ((int)resp.StatusCode >= 400)
+            {
+                Log?.Invoke($"token→cookie 交换失败：HTTP {(int)resp.StatusCode}");
+                return false;
+            }
+            lock (_sync)
+            {
+                // 双重检查（交换期间可能另一线程已先行成功）
+                _cookies ??= container;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log?.Invoke($"token→cookie 交换异常：{ex.Message}");
+            return false;
         }
     }
 

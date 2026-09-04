@@ -114,14 +114,6 @@ public partial class MainWindow
                 _trayExitRequested = true;
                 Close();
                 break;
-            case "exitapp":
-                // 退出APP但保留后台 dsh 服务：与 "exit" 同为真退出（跳过托盘化），
-                // 差别在 OnClosed 按 _exitKeepServer 跳过 _server.Shutdown()，服务成孤儿继续运行
-                CloseAllMenus();
-                _trayExitRequested = true;
-                _exitKeepServer = true;
-                Close();
-                break;
         }
     }
 
@@ -129,8 +121,8 @@ public partial class MainWindow
     private void OpenSettingsDialog()
     {
         var dlg = new Views.SettingsWindow { Owner = this };
-        // LAN 共享设置变更即启停代理（fire-and-forget：设置窗内反复拨开关由 _lanShareLock 串行化）
-        dlg.LanShareChanged += () => _ = SyncLanShareFromSettingsAsync();
+        // LAN 共享已禁用（harness v0.1.2-alpha.1 launch token 机制待适配），不再订阅变更事件
+        // dlg.LanShareChanged += () => _ = SyncLanShareFromSettingsAsync();
         dlg.ShowDialog();
         // 设置可能改了余额开关，关闭后同步启动/停止
         SyncBalanceFromSettings();
@@ -362,7 +354,7 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>托盘菜单项：打开主窗口 / 检查 Harness 更新 / 检查应用更新 / 诊断信息 / 设置 / 退出APP（保留服务） / 退出（状态与顶栏同步）。</summary>
+    /// <summary>托盘菜单项：打开主窗口 / 检查 Harness 更新 / 检查应用更新 / 诊断信息 / 设置 / 退出（状态与顶栏同步）。</summary>
     private void UpdateTrayMenuItems()
     {
         var items = new List<AppMenuItem>
@@ -372,7 +364,6 @@ public partial class MainWindow
         AppendUpdateItems(items);
         items.Add(new AppMenuItem("diagnostics", "诊断信息"));
         items.Add(new AppMenuItem("settings", "设置"));
-        items.Add(new AppMenuItem("exitapp", "退出APP（保留服务）"));
         items.Add(new AppMenuItem("exit", "退出"));
         TrayMenu.ItemsSource = items;
     }
@@ -425,9 +416,6 @@ public partial class MainWindow
             new("diagnostics", "诊断信息"),
         };
         AppendUpdateItems(items);
-        // 顶栏"退出APP（保留服务）"：只关壳，后台 dsh 服务继续运行（下次启动重新接管）；
-        // "退出"（与托盘一致）：退出整个 harness（壳 + dsh 服务）
-        items.Add(new AppMenuItem("exitapp", "退出APP（保留服务）"));
         items.Add(new AppMenuItem("exit", "退出"));
         TopMenu.ItemsSource = items;
         UpdateTrayMenuItems(); // 托盘更新项与顶栏联动

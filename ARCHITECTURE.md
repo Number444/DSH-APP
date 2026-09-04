@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-08-26 · 版本 v1.6.0 · 本次更新:局域网共享（LAN Share：壳内 Kestrel+YARP 代理转发 127.0.0.1:3080，token 门禁 + Host/Origin 重写 + 特权写操作拦截 + randomUUID polyfill 注入）
+> 更新时间:2026-09-04 · 版本 v1.7.0 · 本次更新:适配 harness v0.1.2-alpha.1 launch token 鉴权（壳抓 stdout 取带 token URL，WebSocket 事件流经 HttpClient cookie 交换握手）；归档"远程接管外部 dsh"与"退出APP（保留服务）"菜单项；设置页隐藏 LAN Share 入口（待 token 适配）
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -91,18 +91,20 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
              → Profile.PreferredColorScheme=Dark(页面滚动条/表单深色)
               → 订阅 NavigationCompleted / ProcessFailed
            → EnsureServerAsync:
-             → DetectRunningServerAsync(): 并发 HTTP GET 3080~3090(Task.WhenAll,最坏 ~1s,取存活最小端口)
-                 ├─ 命中 → 记录监听 PID(netstat)+ 身份验证(CIM 命令行含 dsh/bin.js 特征)
-                 │     ├─ 确认为 dsh → 接管模式:关窗时一并停止;页面就绪后启动 30s 心跳
-                 │     └─ 非 dsh → 直连但不接管:关窗不清理(绝不误杀)
-                 └─ 未命中 → selfStarted = true
+             → 端口占用检测: 仅 3080;被占用即报错（v1.7.0 起归档"远程接管"——launch token
+               仅存于拉起进程的 stdout，外部进程无法取得,接管路径根本失效）
+             └─ 空闲 → selfStarted = true
                      → 解析 node.exe 与 dsh 入口 bin.js(进程 PATH → 注册表 PATH → 常见位置,绕开 .cmd 包装器)
                      → TryStartServer(): Process.Start(node.exe, bin.js web)
                           CreateNoWindow=true(无黑窗)
                           RedirectStandardOutput/Error → 异步读 → Log 事件
+                          + stdout 抓取 `dsh web: <URL>` 行 → AuthenticatedUrl（v1.7.0 新增）
                           EnableRaisingEvents=true → 就绪后中途退出触发 ServerDied 事件
-                     → 每 500ms 轮询 IsHttpAlive,30s 超时;中途进程退出 → 立即判失败
-      ③ 双双就绪 → StartCompletionNotifyIfEnabled()（完成通知开启时连接事件流,不等页面加载）→ WebView.CoreWebView2.Navigate("http://127.0.0.1:3080")
+                     → 每 500ms 轮询 IsHttpAlive + AuthenticatedUrl 非空,30s 超时;中途进程退出 → 立即判失败
+      ③ 双双就绪 → StartCompletionNotifyIfEnabled()（完成通知开启时连接事件流,不等页面加载；
+                    v1.7.0 起握手前先 HttpClient GET AuthenticatedUrl 完成 token→cookie 交换,
+                    ClientWebSocket 通过 Options.Cookies 携带 dsh-auth-* cookie）
+                    → WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl)
   → WebView2 渲染 Harness 前端 → NavigationCompleted(IsSuccess)
       → WebView.Visibility=Visible → HideOverlay(150ms 淡出)→ 用户看到可对话界面
       → StartBalanceIfEnabled()(余额开启时启动 60s 轮询)
@@ -190,6 +192,45 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 - WebView2 用户数据:`%LOCALAPPDATA%\dsh-app\WebView2\`（与 Edge 隔离；缓存清理只动其中的 Cache/Code Cache/GPUCache）
 - 窗口位置/尺寸/最大化状态:`%LOCALAPPDATA%\dsh-app\window.json`(还原前校验与虚拟屏有交集,防外接屏拔除后窗口不可见)
 - 设置:`%LOCALAPPDATA%\dsh-app\settings.json`(主题/自动检查更新/自动检查应用更新/界面缩放/余额开关/凭据读取授权标记/手动 Key 的 DPAPI 密文,原子写入)
+
+## 9. 已归档功能
+
+### 远程接管外部 dsh 实例（v1.7.0 归档，harness v0.1.2-alpha.1 起失效）
+
+**归档原因**：harness 自 v0.1.2-alpha.1 起引入 per-process launch token 鉴权——
+启动 URL 携带一次性 token，首次访问换 `HttpOnly; SameSite=Strict` 签名 cookie，
+后续所有 API / WebSocket 请求都要 cookie 否则 401。token 只存在于拉起该 dsh
+进程的 stdout（`dsh web: http://...?token=xxx`），壳无法从外部已运行的
+dsh 进程拿到 token，远程接管路径根本性失效。
+
+**历史行为**（已注释保留，见 `ServerController.cs` 内"已归档"区块）：
+- `DetectRunningServerAsync`：3080~3090 并发 HTTP 探测 + netstat 取 PID + CIM
+  命令行特征匹配（含 `dsh` / `bin.js`）双重身份验证；接管模式下关窗时
+  `taskkill /T /F` 一并停止
+- `IsManaged` 属性原本等价于 `_selfStarted || _adoptedIsDsh`，供 Harness 更新
+  前置判断；归档后等价于 `_selfStarted`（签名保留，调用方无需改）
+- 心跳 `CheckAliveAsync` 原本只在接管模式下启动（自家进程死亡由 Exited 事件
+  覆盖）；归档后 IsSelfStarted 恒 true，心跳不再启动
+
+**当前行为**：启动时仅检测 3080 是否被占用；被占用即报错并提示用户手动关闭，
+不再尝试接管。
+
+### "退出APP（保留服务）"菜单项（v1.7.0 删除）
+
+该项存在的唯一意义是让 dsh 服务成孤儿继续跑，等下次启动接管。接管功能归档后
+该项失去存在理由，与"退出"完全等价。顶栏/托盘菜单中的该项已删除，
+`_exitKeepServer` 字段与 OnClosed 相关分支一并移除。
+
+### LAN Share 局域网共享（v1.7.0 暂时禁用）
+
+LAN Share 代理转发链路未适配 launch token 机制（LAN 侧浏览器首次访问需先完成
+token→cookie 交换，涉及代理层 302 重写与 cookie 透传设计）。v1.7.0 起：
+- 设置页 LAN Share 整段（`ChkLanShare` / `LanSharePanel`）外层包
+  `StackPanel Visibility="Collapsed"` 隐藏
+- `MainWindow.OpenSettingsDialog` 不再订阅 `LanShareChanged`
+- `OnLoaded` / 重试 / 重启 / Harness 更新路径中 `SyncLanShareFromSettingsAsync()`
+  调用均注释
+- `LanShareProxy` 类与 `_lanShare` 字段保留未删（供后续适配）
 
 ## 8. 排除的备选方案(决策记录)
 

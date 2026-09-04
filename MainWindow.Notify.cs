@@ -25,16 +25,18 @@ public partial class MainWindow
         Completion,
     }
 
-    /// <summary>服务就绪后启动完成通知监听（仅设置开启时；幂等，端口变化时自动重启跟随）。</summary>
+    /// <summary>服务就绪后启动完成通知监听（仅设置开启时；幂等，端口/token 变化时自动重启跟随）。</summary>
     private void StartCompletionNotifyIfEnabled()
     {
         if (!AppSettings.Current.SessionCompletionNotify) return;
+        // harness v0.1.2-alpha.1+：无 token URL 时跳过（WebSocket 握手必 401）
+        if (_server.AuthenticatedUrl is null) return;
         if (_completionNotifyRunning && _completionNotifyPort == _server.Port) return;
         if (_completionNotifyRunning)
             _completionNotify.Stop(); // 端口变了：旧监听连的是死端口，停了重启（下方重新 Start）
         _completionNotifyRunning = true;
         _completionNotifyPort = _server.Port;
-        _completionNotify.Start(_server.Port);
+        _completionNotify.Start(_server.Port, _server.AuthenticatedUrl);
     }
 
     /// <summary>设置窗关闭后同步完成通知开关状态（开 → 启动；关 → 停止）。</summary>

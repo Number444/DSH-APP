@@ -120,9 +120,8 @@ public partial class MainWindow
             _server.Shutdown(); // 必须先停服：运行中的 node 进程持有 bin.js 文件句柄，npm 覆盖安装会 EPERM
             var updated = await _updater.UpdateAsync();
             var restarted = await _server.EnsureServerAsync();
-            // 局域网共享代理重同步（服务端口可能变化；restarted=false 时代理目标已死，同步保持开启状态即可，
-            // 后续"重试"成功路径会再次同步）
-            await SyncLanShareFromSettingsAsync();
+            // 局域网共享代理重同步：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
+            // await SyncLanShareFromSettingsAsync();
 
             if (updated && restarted)
             {
@@ -131,7 +130,12 @@ public partial class MainWindow
                 new Views.ConfirmDialog("更新完成",
                     $"Harness 已更新到 v{_updater.LocalVersion}。",
                     "好的", glyph: "✓") { Owner = this }.ShowDialog();
-                WebView.CoreWebView2.Navigate($"http://127.0.0.1:{_server.Port}");
+                if (_server.AuthenticatedUrl is not null)
+                    WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl);
+                else
+                    ShowError("无法获取访问令牌",
+                        "harness 服务已启动，但壳未能从启动输出中解析到带 token 的 URL。\n请查看日志。",
+                        allowRetry: true);
             }
             else
             {
