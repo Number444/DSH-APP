@@ -28,6 +28,10 @@ public partial class MainWindow
     /// <summary>服务就绪后启动完成通知监听（仅设置开启时；幂等，端口/token 变化时自动重启跟随）。</summary>
     private void StartCompletionNotifyIfEnabled()
     {
+        // 已禁用：harness v0.1.2-alpha.1 起事件流迁移到 /api/remote.mux（Typert Remote Stream 多路复用协议），
+        // 旧路径 /api/events.host 已删除。CompletionNotifier 需重写为该协议才能恢复，暂时整体跳过。
+        return;
+#pragma warning disable CS0162 // 不可达代码（刻意保留以便后续恢复）
         if (!AppSettings.Current.SessionCompletionNotify) return;
         // harness v0.1.2-alpha.1+：无 token URL 时跳过（WebSocket 握手必 401）
         if (_server.AuthenticatedUrl is null) return;
@@ -37,6 +41,7 @@ public partial class MainWindow
         _completionNotifyRunning = true;
         _completionNotifyPort = _server.Port;
         _completionNotify.Start(_server.Port, _server.AuthenticatedUrl);
+#pragma warning restore CS0162
     }
 
     /// <summary>设置窗关闭后同步完成通知开关状态（开 → 启动；关 → 停止）。</summary>

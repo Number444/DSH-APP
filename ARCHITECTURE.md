@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-09-04 · 版本 v1.7.0 · 本次更新:适配 harness v0.1.2-alpha.1 launch token 鉴权（壳抓 stdout 取带 token URL，WebSocket 事件流经 HttpClient cookie 交换握手）；归档"远程接管外部 dsh"与"退出APP（保留服务）"菜单项；设置页隐藏 LAN Share 入口（待 token 适配）
+> 更新时间:2026-09-04 · 版本 v1.7.0 · 本次更新:适配 harness v0.1.2-alpha.1 launch token 鉴权（壳抓 stdout 取带 token URL，WebSocket 事件流经 HttpClient cookie 交换握手）；归档"远程接管外部 dsh"与"退出APP（保留服务）"菜单项；设置页隐藏 LAN Share 入口（待 token 适配）；会话完成通知暂时禁用（事件流迁移 /api/remote.mux 多路复用协议，待重写）
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -231,6 +231,18 @@ token→cookie 交换，涉及代理层 302 重写与 cookie 透传设计）。v
 - `OnLoaded` / 重试 / 重启 / Harness 更新路径中 `SyncLanShareFromSettingsAsync()`
   调用均注释
 - `LanShareProxy` 类与 `_lanShare` 字段保留未删（供后续适配）
+
+### 会话完成通知 / CompletionNotifier（v1.7.0 暂时禁用）
+
+harness v0.1.2-alpha.1 起事件流端点 `/api/events.host` 被删除，替换为多路复用
+WebSocket `/api/remote.mux`（Typert Remote Stream 协议，单条物理 WS 上跑多个逻辑流；
+事件订阅通过 `openStream("$events", { args: {} })` 在 mux 上开逻辑流）。协议未文档化，
+C# 侧复刻成本高且跟随 harness 演进脆弱，v1.7.0 起禁用：
+- `MainWindow.Notify.cs StartCompletionNotifyIfEnabled()` 入口 `return`，原代码以
+  `#pragma warning disable CS0162` 保留
+- 设置页"通知"段（`ChkSessionNotify`）外层 `StackPanel Visibility="Collapsed"` 隐藏
+- `CompletionNotifier` 类（含已实现的 token→cookie 握手）保留未删，供后续按
+  mux 协议重写时复用鉴权部分
 
 ## 8. 排除的备选方案(决策记录)
 

@@ -120,7 +120,8 @@
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}" />
 
-        <!-- ==================== 通知 ==================== -->
+        <!-- ==================== 通知（已禁用：harness v0.1.2-alpha.1 事件流迁移至 /api/remote.mux 多路复用协议，CompletionNotifier 待重写） ==================== -->
+        <StackPanel Visibility="Collapsed">
         <TextBlock Text="通知"
                    Margin="0,16,0,0"
                    FontSize="13"
@@ -137,6 +138,7 @@
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}"
                    TextWrapping="Wrap" />
+        </StackPanel>
 
         <!-- ==================== 局域网共享（已禁用：harness v0.1.2-alpha.1 launch token 机制待适配） ==================== -->
         <StackPanel Visibility="Collapsed">

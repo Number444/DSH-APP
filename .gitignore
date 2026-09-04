@@ -13,3 +13,5 @@ Assets/icon256.png
 
 # 本地日志
 *.log
+
+publish/
