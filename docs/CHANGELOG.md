@@ -1,5 +1,11 @@
 # 变更记录
 
+## 未发布
+
+- **会话完成通知 v2（harness 插件方案，接替 v1.7.0 的禁用态）**：壳首启幂等安装 `dsh-notify` 插件到 harness profile——挂载链四要件：包本体（按版本覆写）+ `dependencies` 版本钉 + `dsh.profile.bundles` 登记 + **插件 package.json 的 `dsh.bundle.patch` 声明与 cordis.patch.yml 补丁文件**（缺第四件 harness 启动即 exit 1，首轮实测踩中）；插件在 harness 进程内订阅官方事件 `api-session/status` 检测 running→idle 边沿即弹 Windows Toast（无去抖，秒回也通知——Four 拍板删除 0.1.1 的 minBusySeconds）——窗口托盘化/页面挂起期间照常通知（通知源在 harness 进程内，与页面存亡无关）
+- 设置页「会话完成通知」开关恢复可见并切换语义为插件总开关：壳同步写 `settings.yaml` 的 `dsh-notify.enabled`，插件在完成边沿重读配置，改动即时生效免重启；`settings.yaml` 写入保留原编码/BOM/换行风格
+- **v1（CompletionNotifier 直连事件流）整体删除**：`/api/events.host` 已随新版 harness 移除，v1.7.0 保留待重写的 token 握手代码一并清除（v2 插件方案使其失去重写对象）；托盘气泡点击路由保留（余额通知仍在用）
+
 ## v1.7.0（2026-09-04）
 
 - **适配 harness v0.1.2-alpha.1 launch token 鉴权**：新版 harness 启动时生成一次性 token，裸 URL 一律 401——壳改为从 `dsh web` 启动输出（stdout `dsh web: <URL>` 行）抓取带 token 的访问地址，窗口加载、「浏览器打开」全部改用该地址；解析失败降级为明确的错误卡片而非天书

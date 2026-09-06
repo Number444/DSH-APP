@@ -11,9 +11,9 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 2. 用 WebView2 在独立窗口里渲染 Harness UI
 3. 管理服务器生命周期(关窗默认最小化到托盘,服务继续;菜单「退出APP（保留服务）」只退壳、服务成孤儿待下次启动接管;"退出"才停服,仅停自己拉起的 + 接管验证过的)
 4. 提供启动状态、错误提示与断连检测
-5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚,确认弹窗展示 Release 说明)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、**会话完成通知（壳直连服务事件流检测模型输出完成,弹系统通知,托盘化/页面挂起期间照常）**、**局域网共享（设置页开关,壳内代理让手机/其他电脑经 LAN 访问同一 Harness,双端实时同步,详见模块表「共享层」）**、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)、设置页维护入口(打开数据目录、页面缓存清理)
+5. 增值功能:Harness 更新(菜单检查 + 后台自动检查,经用户确认后 npm 安装)、应用自更新(菜单检查 + 后台自动检查 GitHub Releases,下载校验后更新器覆盖 exe 自动重启,失败自动回滚,确认弹窗展示 Release 说明)、顶栏余额显示(API Key 经用户确认授权后读取 dsh 凭据,属 §6 记录的红线例外)、余额告警与充值入口、**会话完成通知（v2：壳首启幂等安装 harness 内 dsh-notify 插件,插件订阅官方事件检测模型输出完成,进程内弹 Windows Toast,关窗托盘化期间照常）**、**局域网共享（v1.7.0 暂时禁用：代理链路待适配 launch token,代码保留）**、系统托盘常驻、诊断信息面板(一键收集环境状态可复制)、设置页维护入口(打开数据目录、页面缓存清理)
 
-壳与 Harness 的接触面：`http://127.0.0.1:3080`（HTTP 边界,零侵入）+ 一条 WebSocket 下行事件流（`/api/events.host`，只收不发，供会话完成通知）。
+壳与 Harness 的接触面：`http://127.0.0.1:3080`（HTTP 边界,零侵入）+ profile 挂载链写入（`$DSH_HOME/profiles/web`，dsh-notify 插件四要件安装，首启幂等）。
 这也是它对"已安装 dsh 的任意电脑"零适配可用的原因。
 
 ```
@@ -46,7 +46,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化、`App.AppVersion`（壳版本）、启动清理 update 下载残留、**日志截断（`FileLog.TrimIfOversize`，单实例判定后执行）**、**缓存清理执行（`WebView2CacheCleaner.RunPendingCleanup`，WebView2 初始化前）** |
-| 窗口层 | `MainWindow.xaml(.cs)` + **8 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱、`.Notify` 完成通知接线+气泡点击路由、`.LanShare` 局域网共享接线） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出APP（保留服务）/退出）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
+| 窗口层 | `MainWindow.xaml(.cs)` + **8 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱、`.Notify` 完成通知插件安装/开关同步+气泡点击路由、`.LanShare` 局域网共享接线） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出APP（保留服务）/退出）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
 | 共享层 | `Server/LanShareProxy.cs` | 局域网共享代理：Kestrel 绑 `0.0.0.0:3081` + YARP 反代到 `127.0.0.1:{服务端口}`；token 门禁（`?key=` 首验种 Cookie，常量时间比较）；Host+Origin 重写过 harness trust 围栏；特权写操作 LAN 侧 403（settings/credentials 写、agentPreset 写、host 原生动作、llm.discoverModels）；`crypto.randomUUID` polyfill 注入 HTML（非安全上下文补救）；HTTP/SSE/WebSocket 全透传；启停随设置开关与服务重启重同步，壳退出限时 2s 停服 |
 | 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较（共用 `Helpers/SemVer.cs`），超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
@@ -54,7 +54,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 诊断层 | `Helpers/Diagnostics.cs` + `Views/DiagnosticsWindow` | 环境与运行状态并行采集（node 版本/服务状态/代理/GitHub 连通性/设置项）,敏感边界:绝不含凭据;纯文本一键复制 |
 | 版本层 | `Helpers/SemVer.cs` | semver 比较（提取自 HarnessUpdater,Harness 与应用自更新共用;pre-release 规则,不误报） |
 | 余额层 | `Server/BalanceMonitor.cs` + `Server/BalanceProviders.cs` + `Helpers/CredentialsReader.cs` | 余额/额度轮询（60s）、**双来源 provider（DeepSeek ¥ 余额 / Kimi for Coding 配额，设置页切换）**、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、**失败闭环（来源快照防热切换竞态 + `RefreshFailed` 事件 + 单调时钟防抖）**、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
-| 通知层 | `Server/CompletionNotifier.cs` | 会话完成通知：WebSocket 直连 `/api/events.host`（只收不发——客户端发消息属协议违规被 1008 关闭；本机 loopback 无 Origin 即过信任栅栏；显式禁用系统代理防 Clash 劫持握手）；`host/session-status` running→idle 边沿 → 回调弹系统 toast；边沿表 + 子代理静音（origin=subagent）+ 出错文案变体（host/agent-error 挂账）；宽容解析（坏帧跳过不杀流）；断流退避重连（2s/5s/15s 封顶，健康连接断开退避归零）；端口变化随服务重启自动跟随 |
+| 通知层 | `Server/NotifyPluginInstaller.cs` + 内嵌 `scripts/dsh-notify/`（harness cordis 插件包） | 会话完成通知 v2：壳首启把插件幂等装入 profile——挂载链四要件（包本体按版本覆写 + package.json `dependencies` 版本钉 + `dsh.profile.bundles` 登记 + **插件自身 package.json 的 `dsh.bundle.patch` 声明及 cordis.patch.yml 补丁文件**；缺第四件 harness 启动即 exit 1,首轮实测踩中,踩坑定案见 skill）；插件在 harness 进程内订阅官方事件 `api-session/status`（dsh-api-session-controller 广播,running true→false 边沿 = 完成）,状态表防重复 idle 帧 + 完成边沿重读配置使开关即时生效（0.1.2 起无去抖——Four 拍板秒回也通知）,child_process 弹 WinRT Toast（-EncodedCommand 免疫引号/编码,AppID 借 PowerShell 自有标识）；设置页开关由壳同步写 `dsh-notify.enabled`；窗口托盘化/页面挂起后照常弹（通知源在 harness 进程内，与页面存亡无关）|
 | 设置层 | `Helpers/AppSettings.cs` | 共享设置（主题/自动检查更新/余额开关/授权标记/加密 Key/完成通知开关），settings.json 持久化（Lazy + 原子替换） |
 | 主题层 | `Helpers/ThemeManager.cs` + `Resources/Colors.*.xaml` | 深/浅/跟随系统三模式、持久化、系统主题监听；`ButtonBlueBrush`（主操作按钮，对比度达标） |
 | 安全层 | `Helpers/DpapiHelper.cs` | DPAPI 加解密（CurrentUser），密钥类字段存储 |
@@ -101,10 +101,8 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
                           + stdout 抓取 `dsh web: <URL>` 行 → AuthenticatedUrl（v1.7.0 新增）
                           EnableRaisingEvents=true → 就绪后中途退出触发 ServerDied 事件
                      → 每 500ms 轮询 IsHttpAlive + AuthenticatedUrl 非空,30s 超时;中途进程退出 → 立即判失败
-      ③ 双双就绪 → StartCompletionNotifyIfEnabled()（完成通知开启时连接事件流,不等页面加载；
-                    v1.7.0 起握手前先 HttpClient GET AuthenticatedUrl 完成 token→cookie 交换,
-                    ClientWebSocket 通过 Options.Cookies 携带 dsh-auth-* cookie）
-                    → WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl)
+      ③ 双双就绪 → WebView.CoreWebView2.Navigate(_server.AuthenticatedUrl)
+   （注：EnsureNotifyPluginInstalled() 在服务拉起**之前**执行——bundle 只在 harness 启动时装载,装晚了当次启动读到的是旧插件,实测踩中）
   → WebView2 渲染 Harness 前端 → NavigationCompleted(IsSuccess)
       → WebView.Visibility=Visible → HideOverlay(150ms 淡出)→ 用户看到可对话界面
       → StartBalanceIfEnabled()(余额开启时启动 60s 轮询)
@@ -143,7 +141,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 应用自更新回滚 | 更新器 45s 双条件验证失败 → 终止新进程 → 备份覆盖回 → 启动旧版 → 写 `rolled-back.flag`；新实例启动检测到标记 → 弹说明窗（回滚不可无声无息） |
 | 更新器等待超时 | 旧实例 60s 未退出 → 放弃覆盖（.new 保留，日志说明），绝不半覆盖 |
 | 余额刷新失败 | 点击余额 → 状态卡"正在刷新…"→ 成功 ✓绿 / 失败 ✗红 / 防抖忽略 ⚠橙（仅用户点击场景弹窗，轮询静默） |
-| 事件流断连/服务重启换端口 | CompletionNotifier 退避重连（2s/5s/15s 封顶；健康连接断开退避归零）；重试/重启路径幂等重入 `StartCompletionNotifyIfEnabled`，端口变化先停旧监听再连新端口 |
+| 服务重启/插件未生效 | 通知插件在 harness 进程内,随服务重启自动加载;壳首启安装后若服务当时已在运行,下次重启 dsh 服务才装载（启动日志有提示）；卸载 = 四要件同删（包目录 + package.json 两行,插件包内声明随包同灭） |
 | 未捕获异常 | `DispatcherUnhandledException` → 写日志 → 停服务器 → 提示 → 退出 |
 | 重复双击 | 第二实例 Mutex 冲突 → 激活第一个 → 退出码 0 |
 
@@ -173,12 +171,12 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 22. **Popup 动画公共化（PopupAnimator）**——菜单/状态卡/启动页共用一套打开/关闭动画（打开=抛出+BackEase 回弹+缩放+模糊渐清，关闭=收拢+模糊+渐隐）；必须 `Animatable.BeginAnimation` 直调（`Storyboard.SetTarget` 对 Transform/Effect 等 Freezable 目标静默丢弃，曾致缩放/位移/模糊定格在起始态）；`BeginAnimation` 同属性替换天然取消旧动画（被替换时钟不触发 Completed，孤儿动画回调 `ReferenceEquals` 防误清）；渲染 Tier<2 禁逐帧模糊；尊重系统"菜单动画"开关；短生命周期提示用轻量档（320ms/220ms——200ms/10% 量级肉眼不可感知，实测调参结论）
 23. **像素点阵进度条（MainWindow.Progress）**——90 列×2 行像素屏（3px 格+1px 缝，熄灭态 12% 透明度保持点阵质感）+ 波式级联点亮（120ms 淡入 + 8ms/列）+ 亮白前沿列 + 彗尾光柱群按宽度比例锚定已点亮区域（固定种子，每次启动布局一致）；启动覆盖层与下载进度窗共用，真实步骤/下载进度驱动
 24. **余额刷新失败闭环**——来源快照（刷新期间切换 Kimi/DeepSeek 来源，迟到的旧来源响应直接丢弃）；KeepOld 保留旧值时发 `RefreshFailed`（手动刷新状态卡红字"保留上次值"，防"正在刷新…"卡死与后续轮询误弹"已更新"）；防抖改 `Environment.TickCount64` 单调时钟（系统时间回拨不再卡死刷新）
-25. **壳原生会话完成通知（CompletionNotifier，WebSocket 事件流）**——直连 `/api/events.host`（实测该端点只收 WebSocket upgrade，普通 GET 返回 426 无 SSE 回退——方向文件原按 SSE 设计，实施时纠正）；`agent/status` 仅 idle/running 两值且严格交替（重复状态是 host 硬断言），流只发真实翻转、无初始快照 → running:false 恒为一次运行的结束，壳启动前就在跑的会话只见收尾帧同样通知；子代理会话静音（session-added origin=subagent，实测帧序恒为 added→status）；取代浏览器插件的根本原因：托盘化/页面挂起期间插件失灵，壳进程事件流照常
+25. **会话完成通知 v2（dsh-notify 插件，NotifyPluginInstaller 首启安装）**——v1（CompletionNotifier 直连 `/api/events.host` WebSocket）随新版 harness（0.1.2-rc.x）移除该端点而死，整体删除；v2 改为 harness 进程内 cordis 插件订阅官方事件 `api-session/status`（`ctx.emit("api-session/status", agent.id, status === "running")`，dsh-api-session-controller/lib/index.js:2621），通知源从「壳连服务器」变为「服务器内插件」→ 独占优势：窗口托盘化/页面挂起期间插件随 harness 存活照常弹通知；挂载链**四要件**（包本体 + dependencies + bundles + **插件 package.json 的 `dsh.bundle.patch` 声明与 cordis.patch.yml 补丁文件**，缺一则 harness 启动 exit 1——前三件缺验于 v1.5.0 退役踩坑,第四件缺验于 v2 首轮实测）；插件在完成边沿重读 settings.yaml 配置 → 壳设置页开关即时生效免重启；Toast 走 `-EncodedCommand`（UTF-16LE base64）免疫引号/控制台编码
 26. **气泡点击按种类路由（`_balloonKind`）**——`TrayBalloonTipClicked` 是单事件多消费者（余额告警→充值页 / 完成通知→恢复窗口），记录最近气泡种类分派；系统 toast 可排队故为近似值，误判代价低（多点一次/少跳一次）
 
 ## 6. 可移植性设计
 
-- 壳内**零绝对路径硬编码**:不引用 `C:\Agent Space`、不引用 `~/.dsh`(服务器环境由 `dsh web` 按本机 profile 解析)
+- 壳内**零绝对路径硬编码**:不引用 `C:\Agent Space`、`D:\Agent Space`；唯一环境根引用是 dsh-notify 安装器解析 `$DSH_HOME`（env 优先,回退 `~/.dsh`）写 profile 挂载链——这是插件安装的必要接触面,不算业务耦合
 - **唯一例外(用户特批)**:余额显示功能在用户经确认弹窗**显式授权**后读取 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY` / `KIMI_CODING_API_KEY`(按显示来源取用其一;仅内存使用、不落盘、可随时在设置页撤销);未授权一律回退环境变量/手动填写,绝无隐式读取
 - **端口可配置/容错**:默认 3080,并发探测 3080~3090
 - 日志与 WebView2 数据均在 `%LOCALAPPDATA%\dsh-app\`,不写安装目录,避免权限问题
@@ -232,17 +230,15 @@ token→cookie 交换，涉及代理层 302 重写与 cookie 透传设计）。v
   调用均注释
 - `LanShareProxy` 类与 `_lanShare` 字段保留未删（供后续适配）
 
-### 会话完成通知 / CompletionNotifier（v1.7.0 暂时禁用）
+### 会话完成通知：v1 禁用 → v2 插件化接替（未发布）
 
 harness v0.1.2-alpha.1 起事件流端点 `/api/events.host` 被删除，替换为多路复用
-WebSocket `/api/remote.mux`（Typert Remote Stream 协议，单条物理 WS 上跑多个逻辑流；
-事件订阅通过 `openStream("$events", { args: {} })` 在 mux 上开逻辑流）。协议未文档化，
-C# 侧复刻成本高且跟随 harness 演进脆弱，v1.7.0 起禁用：
-- `MainWindow.Notify.cs StartCompletionNotifyIfEnabled()` 入口 `return`，原代码以
-  `#pragma warning disable CS0162` 保留
-- 设置页"通知"段（`ChkSessionNotify`）外层 `StackPanel Visibility="Collapsed"` 隐藏
-- `CompletionNotifier` 类（含已实现的 token→cookie 握手）保留未删，供后续按
-  mux 协议重写时复用鉴权部分
+WebSocket `/api/remote.mux`（Typert Remote Stream 协议；事件订阅通过
+`openStream("$events", { args: {} })` 在 mux 上开逻辑流）。v1.7.0 曾禁用旧功能、保留
+`CompletionNotifier` 待按 mux 协议重写；v2 改为 harness 进程内 cordis 插件
+（dsh-notify，决策 25）后重写对象消失，`CompletionNotifier` 与全部接线整体删除，
+设置页"通知"段恢复可见（开关语义 = 插件总开关，壳写 `settings.yaml` 的
+`dsh-notify.enabled`，插件完成边沿重读即时生效）。
 
 ## 8. 排除的备选方案(决策记录)
 

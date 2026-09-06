@@ -111,9 +111,7 @@ public partial class MainWindow : Window
         _balance.BalanceAmountChanged += amount => DispatchUi(() => OnBalanceAmountChanged(amount));
         _balance.RefreshFailed += err => DispatchUi(() => OnBalanceRefreshFailed(err));
 
-        // 会话完成通知：直连服务事件流（托盘化/页面挂起期间照常工作），回调同样经 Dispatcher 上 UI
-        _completionNotify.Log += msg => DispatchUi(() => AppendLog(msg));
-        _completionNotify.SessionFinished += (id, err) => DispatchUi(() => OnSessionFinished(id, err));
+        // 会话完成通知 v2：harness 进程内 dsh-notify 插件承担（NotifyPluginInstaller 首启安装），壳侧无事件流可订阅
 
         // 局域网共享代理：日志/状态事件（见 MainWindow.LanShare.cs）
         InitLanShare();
@@ -192,6 +190,10 @@ public partial class MainWindow : Window
             // 最先显示覆盖层：WebView2 首次冷启动可能耗时数秒，不能让它黑屏干等
             ShowLoading();
 
+            // 通知插件必须先于服务拉起完成安装（bundle 只在 harness 启动时装载；
+            // 装在服务就绪后会慢一拍——首装当次启动读不到新插件，实测踩中）
+            EnsureNotifyPluginInstalled();
+
             // WebView2 初始化与服务拉起互不依赖，并行执行缩短冷启动
             var webTask = InitWebViewAsync();
             var srvTask = _server.EnsureServerAsync();
@@ -202,9 +204,6 @@ public partial class MainWindow : Window
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
-
-            // 完成通知监听不依赖页面加载：服务就绪即启动（WebView2 挂起/崩溃期间照样通知）
-            StartCompletionNotifyIfEnabled();
 
             // 局域网共享：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
             // await SyncLanShareFromSettingsAsync();
@@ -614,8 +613,7 @@ public partial class MainWindow : Window
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
-            // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
-            StartCompletionNotifyIfEnabled();
+            // 服务重新拉起：通知插件随 harness 进程重启自动加载，壳侧无需动作
             // 局域网共享代理重同步：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
             // await SyncLanShareFromSettingsAsync();
             if (WebView.CoreWebView2 is null)
@@ -707,8 +705,7 @@ public partial class MainWindow : Window
                 ShowError("dsh 服务启动失败", StartupFailureDetail(), allowRetry: true);
                 return;
             }
-            // 服务重新拉起：完成通知监听幂等重启（旧连接已随服务中断，确保存活）
-            StartCompletionNotifyIfEnabled();
+            // 服务重新拉起：通知插件随 harness 进程重启自动加载，壳侧无需动作
             // 局域网共享代理重同步：已禁用（harness v0.1.2-alpha.1 launch token 机制待适配）
             // await SyncLanShareFromSettingsAsync();
             if (WebView.CoreWebView2 is null)
@@ -905,7 +902,6 @@ public partial class MainWindow : Window
         _lanShare.Dispose(); // 停 LAN 共享代理（限 2s，不拖退出）
         _balance.Stop();
         _balance.Dispose();
-        _completionNotify.Dispose(); // 先停事件流监听，迟到的完成帧回调经 DispatchUi 空转不碰已销毁 UI
         _updater.Dispose();
         _appUpdater.Dispose();
         App.ActiveServer = null;

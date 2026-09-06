@@ -1,0 +1,9 @@
+# dsh-notify：会话完成 Windows 通知插件（dsh-app 壳首启安装的 cordis bundle）
+# bundle 不被按 main 入口直接加载——dsh-app-boot 读本包 package.json 的
+# dsh.bundle.patch 指到本文件，把下面的插件行插进 cordis 入口表完成挂载
+# （格式参照 @linxin666/dsh-remote-web-ui 的 cordis.patch.yml）。
+# 缺 dsh.bundle.patch 声明 → harness 启动抛 "declares no dsh.bundle" exit 1（实测踩坑）。
+
+- insert:
+    - id: dsh-notify
+      name: dsh-notify

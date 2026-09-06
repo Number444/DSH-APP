@@ -120,8 +120,7 @@
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}" />
 
-        <!-- ==================== 通知（已禁用：harness v0.1.2-alpha.1 事件流迁移至 /api/remote.mux 多路复用协议，CompletionNotifier 待重写） ==================== -->
-        <StackPanel Visibility="Collapsed">
+        <!-- ==================== 通知（v2：harness 内 dsh-notify 插件承担，壳首启安装；开关经 settings.yaml 即时生效） ==================== -->
         <TextBlock Text="通知"
                    Margin="0,16,0,0"
                    FontSize="13"
@@ -133,12 +132,11 @@
                   Style="{DynamicResource ToggleSwitchStyle}"
                   Checked="OnSessionNotifyChanged"
                   Unchecked="OnSessionNotifyChanged" />
-        <TextBlock Text="模型输出完成（或出错）时通过 Windows 通知提醒；窗口最小化到托盘时同样生效。"
+        <TextBlock Text="模型输出完成时通过 Windows 通知提醒；由 harness 内插件发出，窗口最小化到托盘时同样生效。"
                    Margin="0,6,0,0"
                    FontSize="11"
                    Foreground="{DynamicResource TextWeakBrush}"
                    TextWrapping="Wrap" />
-        </StackPanel>
 
         <!-- ==================== 局域网共享（已禁用：harness v0.1.2-alpha.1 launch token 机制待适配） ==================== -->
         <StackPanel Visibility="Collapsed">

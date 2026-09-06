@@ -3,17 +3,13 @@ using dsh_app.Helpers;
 
 namespace dsh_app;
 
-/// <summary>主窗口分部：壳原生会话完成通知（CompletionNotifier 接线 / 气泡点击路由）。
-/// 直连 dsh 服务 WebSocket 事件流检测 running→idle 边沿，托盘气泡弹系统样式通知；
-/// 窗口托盘化/页面挂起期间照常工作（不依赖 WebView2，取代浏览器插件方案）。</summary>
+/// <summary>主窗口分部：会话完成通知 v2（dsh-notify 插件）与托盘气泡点击路由。
+/// 通知本体已由 harness 进程内插件承担（Server/NotifyPluginInstaller 首启幂等安装，
+/// 方向文件 docs/NEXT-NOTIFY-PLUGIN.md）；壳只负责安装/版本更新与设置开关同步。
+/// 旧 v1（CompletionNotifier 直连 /api/events.host）随新版 harness 移除该端点而退役删除。</summary>
 public partial class MainWindow
 {
-    private readonly Server.CompletionNotifier _completionNotify = new();
-    private bool _completionNotifyRunning;
-    /// <summary>监听当前连接的服务端口（服务重启可能换端口：3080 被占时顺延，旧连接连的是死端口须重启跟随）。</summary>
-    private int _completionNotifyPort;
-
-    /// <summary>最近一个气泡的种类：点击路由用（余额 → 充值页；完成通知 → 恢复主窗口）。
+    /// <summary>最近一个气泡的种类：点击路由用（余额 → 充值页）。
     /// Windows toast 可能排队，种类记录是近似值（新气泡覆盖旧记录），误判代价低（多点一次/少跳一次）。</summary>
     private BalloonKind _balloonKind;
 
@@ -22,63 +18,30 @@ public partial class MainWindow
         None,
         Balance,
         BalanceError,
-        Completion,
     }
 
-    /// <summary>服务就绪后启动完成通知监听（仅设置开启时；幂等，端口/token 变化时自动重启跟随）。</summary>
-    private void StartCompletionNotifyIfEnabled()
+    /// <summary>服务拉起前安装/更新 dsh-notify 插件（bundle 只在 harness 启动时装载，必须先装后拉），
+    /// 并把壳侧开关同步进 settings.yaml。幂等可重入。通知是增值功能，失败只记日志。</summary>
+    private void EnsureNotifyPluginInstalled()
     {
-        // 已禁用：harness v0.1.2-alpha.1 起事件流迁移到 /api/remote.mux（Typert Remote Stream 多路复用协议），
-        // 旧路径 /api/events.host 已删除。CompletionNotifier 需重写为该协议才能恢复，暂时整体跳过。
-        return;
-#pragma warning disable CS0162 // 不可达代码（刻意保留以便后续恢复）
-        if (!AppSettings.Current.SessionCompletionNotify) return;
-        // harness v0.1.2-alpha.1+：无 token URL 时跳过（WebSocket 握手必 401）
-        if (_server.AuthenticatedUrl is null) return;
-        if (_completionNotifyRunning && _completionNotifyPort == _server.Port) return;
-        if (_completionNotifyRunning)
-            _completionNotify.Stop(); // 端口变了：旧监听连的是死端口，停了重启（下方重新 Start）
-        _completionNotifyRunning = true;
-        _completionNotifyPort = _server.Port;
-        _completionNotify.Start(_server.Port, _server.AuthenticatedUrl);
-#pragma warning restore CS0162
+        if (Server.NotifyPluginInstaller.EnsureInstalled(msg => DispatchUi(() => AppendLog(msg))))
+            AppendLog("会话完成通知插件 dsh-notify 已安装/更新，随本次 harness 启动装载");
+        Server.NotifyPluginInstaller.SyncEnabled(AppSettings.Current.SessionCompletionNotify,
+            msg => DispatchUi(() => AppendLog(msg)));
     }
 
-    /// <summary>设置窗关闭后同步完成通知开关状态（开 → 启动；关 → 停止）。</summary>
+    /// <summary>设置窗关闭后同步完成通知开关（写入 settings.yaml 的 dsh-notify.enabled；
+    /// 插件在完成边沿重读配置，改动即时生效，无需重启 dsh 服务）。</summary>
     private void SyncCompletionNotifyFromSettings()
     {
-        if (AppSettings.Current.SessionCompletionNotify)
-            StartCompletionNotifyIfEnabled();
-        else if (_completionNotifyRunning)
-        {
-            _completionNotifyRunning = false;
-            _completionNotify.Stop();
-        }
+        Server.NotifyPluginInstaller.SyncEnabled(AppSettings.Current.SessionCompletionNotify,
+            msg => DispatchUi(() => AppendLog(msg)));
+        AppendLog(AppSettings.Current.SessionCompletionNotify
+            ? "会话完成通知已开启（dsh-notify.enabled=true）"
+            : "会话完成通知已关闭（dsh-notify.enabled=false）");
     }
 
-    /// <summary>会话运行结束（CompletionNotifier 回调，已 DispatchUi 上 UI 线程）：弹系统通知。</summary>
-    private void OnSessionFinished(string sessionId, string? error)
-    {
-        var shortId = sessionId.Length <= 8 ? sessionId : sessionId[..8];
-        try
-        {
-            _balloonKind = BalloonKind.Completion;
-            if (error is null)
-                TrayIcon.ShowBalloonTip("DSH 输出完成",
-                    $"会话 {shortId} 的模型输出已完成。\n点击此通知恢复窗口。",
-                    Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Info);
-            else
-                TrayIcon.ShowBalloonTip("DSH 会话出错",
-                    $"会话 {shortId} 运行出错：{error}",
-                    Hardcodet.Wpf.TaskbarNotification.BalloonIcon.Error);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"完成通知气泡失败: {ex.Message}");
-        }
-    }
-
-    /// <summary>气泡点击路由：按最近气泡种类分派（余额 → 充值页；完成通知 → 恢复主窗口；其余不动作）。</summary>
+    /// <summary>气泡点击路由：按最近气泡种类分派（余额 → 充值页；余额异常 → 设置页；其余不动作）。</summary>
     private void OnBalloonClicked()
     {
         var kind = _balloonKind;
@@ -91,9 +54,6 @@ public partial class MainWindow
             case BalloonKind.BalanceError:
                 ShowMainWindow();
                 OpenSettingsDialog();
-                break;
-            case BalloonKind.Completion:
-                ShowMainWindow();
                 break;
         }
     }

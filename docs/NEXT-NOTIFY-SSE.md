@@ -1,5 +1,7 @@
 # 方向文件：壳原生会话完成通知（SSE 方案）
 
+> **终态（2026-09-08）：本方案代码已整体删除**。新版 harness（0.1.2-rc.x）移除了 `dsh-host-apiproxy`，`/api/events.host` 端点不复存在，本通路名存实亡；功能由 v2 插件方案接替（见 `NEXT-NOTIFY-PLUGIN.md`，已实施）。下文留档备查。
+>
 > 写给 compact 后的新会话。本文件是一次已拍板但尚未实施的功能方向，含全部必要背景与技术锚点。
 > 创建于 2026-08-20 晚，当时 main HEAD = `d8175b0`（另有 7 个未推送 commit：dcbafae → 53208ad → b0f0859 → 0859b2a → 0efb7ff → d677c9a → d8175b0，push 须 Four 明确授权）。
 > **本文件未 commit**（Four 要求先 commit 已有改动、方向文件留待实施时一并入库）。

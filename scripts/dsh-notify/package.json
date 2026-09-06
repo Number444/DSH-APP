@@ -1,0 +1,12 @@
+{
+  "name": "dsh-notify",
+  "version": "0.1.2",
+  "private": true,
+  "description": "dsh session completion toast notifier for Windows (installed by dsh-app shell)",
+  "main": "index.js",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
