@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-09-08 · 版本 v1.7.1 · 本次更新:会话完成通知 v2 落地（harness 进程内 dsh-notify 插件接替被禁用/删除的 v1）——壳首启按四要件幂等安装、先于服务拉起；设置页开关恢复可见并即时生效；无去抖秒回也通知
+> 更新时间:2026-09-06 · 版本 v1.7.1 · 本次更新:会话完成通知 v2 落地（harness 进程内 dsh-notify 插件接替被禁用/删除的 v1）——壳首启按四要件幂等安装、先于服务拉起；设置页开关恢复可见并即时生效；无去抖秒回也通知
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -50,7 +50,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
 | 共享层 | `Server/LanShareProxy.cs` | 局域网共享代理：Kestrel 绑 `0.0.0.0:3081` + YARP 反代到 `127.0.0.1:{服务端口}`；token 门禁（`?key=` 首验种 Cookie，常量时间比较）；Host+Origin 重写过 harness trust 围栏；特权写操作 LAN 侧 403（settings/credentials 写、agentPreset 写、host 原生动作、llm.discoverModels）；`crypto.randomUUID` polyfill 注入 HTML（非安全上下文补救）；HTTP/SSE/WebSocket 全透传；启停随设置开关与服务重启重同步，壳退出限时 2s 停服 |
 | 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较（共用 `Helpers/SemVer.cs`），超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |
-| 自更新层 | `Server/AppUpdater.cs` | 壳自身（dsh-app.exe）更新:GitHub Releases 检查（tag/资产校验 fail-closed）、**Release 说明存取（`LatestReleaseNotes`，截断 1000 字符供确认弹窗展示）**、流式下载 + 同遍 SHA256、磁盘预检、进度节流、更新器脚本生成（内嵌模板提取）;网络策略直连优先 + 7890 代理兜底重试 |
+| 自更新层 | `Server/AppUpdater.cs` | 壳自身（dsh-app.exe）更新:GitHub Releases 检查（tag/资产校验 fail-closed）、**Release 说明存取（`LatestReleaseNotes`，截断 1000 字符供确认弹窗展示）**、流式下载 + 同遍 SHA256 比对 **API 资产 digest**（v1.7.1 起,.sha256 资产退役）、磁盘预检、进度节流、更新器脚本生成（内嵌模板提取）;网络策略直连优先 + 7890 代理兜底重试 |
 | 诊断层 | `Helpers/Diagnostics.cs` + `Views/DiagnosticsWindow` | 环境与运行状态并行采集（node 版本/服务状态/代理/GitHub 连通性/设置项）,敏感边界:绝不含凭据;纯文本一键复制 |
 | 版本层 | `Helpers/SemVer.cs` | semver 比较（提取自 HarnessUpdater,Harness 与应用自更新共用;pre-release 规则,不误报） |
 | 余额层 | `Server/BalanceMonitor.cs` + `Server/BalanceProviders.cs` + `Helpers/CredentialsReader.cs` | 余额/额度轮询（60s）、**双来源 provider（DeepSeek ¥ 余额 / Kimi for Coding 配额，设置页切换）**、Key 来源链（凭据文件→环境变量→手动 DPAPI）、`RefreshAsync` 返回是否实际发起、**失败闭环（来源快照防热切换竞态 + `RefreshFailed` 事件 + 单调时钟防抖）**、`~/.dsh/.credentials.yaml` 读取（仅授权后） |
@@ -159,7 +159,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 10. **最大化钳制（WM_GETMINMAXINFO）**——无边框窗口最大化时把位置/尺寸钳到所在显示器工作区（物理像素,系统层面生效）;不置 `handled` 让 WPF 继续写 MinWidth/MinHeight 约束;配合 `app.manifest` PerMonitorV2 修复混合 DPI 多屏错配与跨屏模糊
 11. **更新流程安全**——停服前置（文件句柄 EPERM）、装后版本验证（防 npm 静默失败）、`IsManaged` 前置（非 dsh 占端口拒绝）、更新中关窗拦截确认、`Dispose` 不杀进程（让安装跑完）
 12. **弹窗自绘体系**——`ConfirmDialog` 单/双按钮 + 类型 glyph（⚠/ℹ/✓）+ 破坏性红色模式;主操作按钮用 `ButtonBlueBrush`（深色 #1F6FEB 白字 4.6:1 达标,不用 #58A6FF 作按钮底）
-13. **应用自更新安全链**——运行中 exe 被锁 → 更新器脚本（PowerShell，内嵌资源模板）在旧实例退出后覆盖；下载同遍 SHA256 + .sha256 严格比对（fail-closed 不装未校验文件）；tag/资产校验 fail-closed；磁盘预检 600MB；更新器 45s 双条件验证（进程 + 端口）失败自动回滚 + 标记文件可见性；备份/清理职责全归脚本（应用启动只清下载残留，防回滚竞态）；`_quitForAppUpdate` 放行托盘拦截
+13. **应用自更新安全链**——运行中 exe 被锁 → 更新器脚本（PowerShell，内嵌资源模板）在旧实例退出后覆盖；下载同遍 SHA256 + **API 资产 digest 严格比对**（v1.7.1 起；GitHub 自动计算，旧契约的独立 .sha256 资产退役——发布侧从未上传过,壳内更新因此从未成功,实锤后改）（fail-closed 不装未校验文件）；tag/资产校验 fail-closed；磁盘预检 600MB；更新器 45s 双条件验证（进程 + 端口）失败自动回滚 + 标记文件可见性；备份/清理职责全归脚本（应用启动只清下载残留，防回滚竞态）；`_quitForAppUpdate` 放行托盘拦截
 14. **两套更新状态机隔离**——Harness（_checking/_updating）与应用（_appChecking/_appUpdating）完全拆分 + 统一入口守卫（任一进行中两个入口均禁用），防互扰与弹窗叠加
 15. **诊断敏感边界**——只采集环境与状态：凭据只报授权布尔、代理只报连通、绝不输出 Key/.npmrc/token 值（复制内容逐字不含敏感信息）
 16. **事件派发异步化（DispatchUi）**——后台事件 → UI 统一 `Dispatcher.BeginInvoke`（v1.4.0 起）：npm 输出洪峰时同步 Invoke 会阻塞管道读取线程；同优先级 FIFO 保序，关闭期派发异常就地吞掉（同 `BalanceMonitor.Dispatch` 惯例）

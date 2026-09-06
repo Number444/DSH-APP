@@ -11,7 +11,7 @@ using dsh_app.Helpers;
 namespace dsh_app.Server;
 
 /// <summary>
-/// 壳自身（dsh-app.exe）更新：检查 GitHub Releases → 下载 → SHA256 校验 → 生成更新器脚本。
+/// 壳自身（dsh-app.exe）更新：检查 GitHub Releases → 下载 → SHA256 校验（API 资产 digest）→ 生成更新器脚本。
 /// 事件模式与 HarnessUpdater 一致（Log 透出，UI 与落盘由调用方处理）；
 /// 安装动作由调用方确认后发起，下载只覆盖 <c>%LOCALAPPDATA%\dsh-app\update</c> 下的临时文件，
 /// 不触碰运行中的 exe；最终覆盖/重启由独立更新器脚本（apply-update.ps1）在旧实例退出后完成。
@@ -21,7 +21,6 @@ public sealed class AppUpdater : IDisposable
     private const string Repo = "Number444/DSH-APP";
     private const string ReleaseApiUrl = "https://api.github.com/repos/" + Repo + "/releases/latest";
     private const string AssetName = "dsh-app.exe";
-    private const string ShaAssetName = "dsh-app.exe.sha256";
 
     /// <summary>检查超时（GitHub API，60s）。</summary>
     private const int CheckTimeoutMs = 60_000;
@@ -36,7 +35,7 @@ public sealed class AppUpdater : IDisposable
 
     /// <summary>Release tag 格式校验（prerelease/draft 天然被 releases/latest 语义排除）。</summary>
     private static readonly Regex TagRegex = new(@"^v\d+\.\d+\.\d+$", RegexOptions.Compiled);
-    /// <summary>SHA256 校验文件严格格式：64 位 hex（发布侧 Get-FileHash 只输出裸哈希，契约三处钉死：发布脚本/壳解析/文档）。</summary>
+    /// <summary>SHA256 摘要严格格式：64 位 hex（校验锚 = API 资产 digest 字段，GitHub 自动计算；旧契约的独立 .sha256 资产已退役）。</summary>
     private static readonly Regex Sha256Regex = new(@"^[0-9a-fA-F]{64}$", RegexOptions.Compiled);
 
     /// <summary>串行化检查/下载，防并发（仿 HarnessUpdater）。</summary>
@@ -66,8 +65,8 @@ public sealed class AppUpdater : IDisposable
     /// <summary>最近一次检查到的 exe 下载地址（同 release）。</summary>
     public string? LatestDownloadUrl { get; private set; }
 
-    /// <summary>最近一次检查到的 SHA256 校验文件地址（同 release）。</summary>
-    public string? LatestShaUrl { get; private set; }
+    /// <summary>最近一次检查到的 exe 期望 SHA256（同 release 资产的 API digest 字段解析，64 位 hex）。</summary>
+    public string? LatestExpectedSha { get; private set; }
 
     /// <summary>最新 Release 的更新说明（body，Markdown 纯文本展示不渲染，截断 1000 字符；无内容/无更新为 null）。</summary>
     public string? LatestReleaseNotes { get; private set; }
@@ -134,7 +133,7 @@ public sealed class AppUpdater : IDisposable
                 HasUpdate = false;
                 LatestVersion = null;
                 LatestDownloadUrl = null;
-                LatestShaUrl = null;
+                LatestExpectedSha = null;
                 LatestReleaseNotes = null;
                 LastError = null;
                 return true;
@@ -177,7 +176,7 @@ public sealed class AppUpdater : IDisposable
                 WriteLog($"已是最新版本：v{version}（本地 v{LocalVersion}）");
                 LatestVersion = version;
                 LatestDownloadUrl = null;
-                LatestShaUrl = null;
+                LatestExpectedSha = null;
                 LatestReleaseNotes = null;
                 LastCheckSucceeded = true;
                 HasUpdate = false;
@@ -185,24 +184,39 @@ public sealed class AppUpdater : IDisposable
                 return true;
             }
 
-            // 有新版：资产校验——exe 与 sha256 必须同时存在（发布不完整 = fail-closed 判检查失败，不误报）
+            // 有新版：资产校验——exe 必须存在；校验锚取 API 资产自带的 digest 字段（"sha256:<64hex>"，
+            // GitHub 对每个上传资产自动计算，发布侧零负担）。独立 .sha256 资产契约退役
+            // （发布侧从未实际上传过该文件，fail-closed 导致壳内应用更新从未真正成功过——2026-09-06 对质实锤）。
             string? exeUrl = null;
-            string? shaUrl = null;
+            string? expectedSha = null;
             if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
             {
                 foreach (var a in assets.EnumerateArray())
                 {
                     if (!a.TryGetProperty("name", out var n) || n.ValueKind != JsonValueKind.String) continue;
-                    if (!a.TryGetProperty("browser_download_url", out var u) || u.ValueKind != JsonValueKind.String) continue;
-                    var name = n.GetString();
-                    if (name == AssetName) exeUrl = u.GetString();
-                    else if (name == ShaAssetName) shaUrl = u.GetString();
+                    if (n.GetString() != AssetName) continue;
+                    if (a.TryGetProperty("browser_download_url", out var u) && u.ValueKind == JsonValueKind.String)
+                        exeUrl = u.GetString();
+                    if (a.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String)
+                    {
+                        var dv = dg.GetString();
+                        if (dv is not null && dv.StartsWith("sha256:") && Sha256Regex.IsMatch(dv[7..]))
+                            expectedSha = dv[7..].ToLowerInvariant();
+                    }
                 }
             }
-            if (exeUrl is null || shaUrl is null)
+            if (exeUrl is null)
             {
-                WriteLog($"Release {tag} 资产不完整（exe/sha256 缺失），判定检查失败");
+                WriteLog($"Release {tag} 缺少 exe 资产，判定检查失败");
                 LastError = "发布不完整（缺少更新资产）";
+                LastCheckSucceeded = false;
+                HasUpdate = false;
+                return false;
+            }
+            if (expectedSha is null)
+            {
+                WriteLog($"Release {tag} exe 资产缺少有效 digest 摘要，判定检查失败");
+                LastError = "发布数据异常（缺少资产摘要）";
                 LastCheckSucceeded = false;
                 HasUpdate = false;
                 return false;
@@ -210,7 +224,7 @@ public sealed class AppUpdater : IDisposable
 
             LatestVersion = version;
             LatestDownloadUrl = exeUrl;
-            LatestShaUrl = shaUrl;
+            LatestExpectedSha = expectedSha;
             // Release 说明顺带存下（更新确认弹窗展示；纯文本不渲染 Markdown）
             LatestReleaseNotes = root.TryGetProperty("body", out var bodyEl) && bodyEl.ValueKind == JsonValueKind.String
                 ? TruncateNotes(bodyEl.GetString())
@@ -228,7 +242,7 @@ public sealed class AppUpdater : IDisposable
     }
 
     /// <summary>
-    /// 下载新 exe（流式 + 同遍 SHA256）并比对同 release 的 .sha256 校验文件。
+    /// 下载新 exe（流式 + 同遍 SHA256）并与检查时取到的 API 资产 digest 严格比对。
     /// 校验通过后 .part → .new；失败/取消即删 .part（fail-closed：不安装未校验文件）。
     /// 磁盘预检：可用空间 ≥ 600MB，不足快速失败。下载不打断运行中的服务。
     /// </summary>
@@ -247,7 +261,7 @@ public sealed class AppUpdater : IDisposable
         try
         {
             if (_disposed) return false;
-            if (LatestDownloadUrl is null || LatestShaUrl is null || LatestVersion is null)
+            if (LatestDownloadUrl is null || LatestExpectedSha is null || LatestVersion is null)
             {
                 LastError = "尚未检查到可用更新";
                 return false;
@@ -308,33 +322,12 @@ public sealed class AppUpdater : IDisposable
                 return false;
             }
 
-            // ② 下载 .sha256 并严格比对
-            try
+            // ② 与检查时取到的 API 资产 digest 严格比对（下载同遍实际哈希 vs 期望摘要）
+            if (!string.Equals(LatestExpectedSha, hash, StringComparison.OrdinalIgnoreCase))
             {
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(30_000);
-                var expected = await DownloadTextAsync(LatestShaUrl, cts.Token);
-                expected = expected?.Trim();
-                if (expected is null || !Sha256Regex.IsMatch(expected))
-                {
-                    WriteLog("校验文件非法（非 64 位 hex），拒绝安装");
-                    DeleteQuietly(partPath);
-                    LastError = "校验文件异常";
-                    return false;
-                }
-                if (!string.Equals(expected, hash, StringComparison.OrdinalIgnoreCase))
-                {
-                    WriteLog($"SHA256 校验失败：期望 {expected}，实际 {hash}，拒绝安装");
-                    DeleteQuietly(partPath);
-                    LastError = "文件校验失败";
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                WriteLog($"校验文件下载失败：{ex.Message}");
+                WriteLog($"SHA256 校验失败：期望 {LatestExpectedSha}，实际 {hash}，拒绝安装");
                 DeleteQuietly(partPath);
-                LastError = "校验文件下载失败";
+                LastError = "文件校验失败";
                 return false;
             }
 
@@ -472,19 +465,6 @@ public sealed class AppUpdater : IDisposable
         }
         await dst.FlushAsync(ct);
         return Convert.ToHexString(hash.GetHashAndReset());
-    }
-
-    /// <summary>下载小文本（.sha256 校验文件）。</summary>
-    private async Task<string?> DownloadTextAsync(string url, CancellationToken ct)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (!resp.IsSuccessStatusCode)
-        {
-            WriteLog($"校验文件下载 HTTP {(int)resp.StatusCode}");
-            return null;
-        }
-        return await resp.Content.ReadAsStringAsync(ct);
     }
 
     /// <summary>检查请求执行：直连或显式代理（代理重试专用 handler，用完即弃，低频可接受）。</summary>

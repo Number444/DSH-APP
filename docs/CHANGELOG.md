@@ -1,11 +1,12 @@
 # 变更记录
 
-## v1.7.1（2026-09-08）
+## v1.7.1（2026-09-06）
 
 - **会话完成通知 v2（harness 插件方案，接替 v1.7.0 的禁用态）**：壳首启幂等安装 `dsh-notify` 插件到 harness profile——挂载链四要件：包本体（按版本覆写）+ `dependencies` 版本钉 + `dsh.profile.bundles` 登记 + **插件 package.json 的 `dsh.bundle.patch` 声明与 cordis.patch.yml 补丁文件**（缺第四件 harness 启动即 exit 1，首轮实测踩中）；插件在 harness 进程内订阅官方事件 `api-session/status` 检测 running→idle 边沿即弹 Windows Toast（无去抖，秒回也通知——Four 拍板删除 0.1.1 的 minBusySeconds）——窗口托盘化/页面挂起期间照常通知（通知源在 harness 进程内，与页面存亡无关）
 - 设置页「会话完成通知」开关恢复可见并切换语义为插件总开关：壳同步写 `settings.yaml` 的 `dsh-notify.enabled`，插件在完成边沿重读配置，改动即时生效免重启；`settings.yaml` 写入保留原编码/BOM/换行风格
 - **v1（CompletionNotifier 直连事件流）整体删除**：`/api/events.host` 已随新版 harness 移除，v1.7.0 保留待重写的 token 握手代码一并清除（v2 插件方案使其失去重写对象）；托盘气泡点击路由保留（余额通知仍在用）
 - 安装时序修正：插件安装先于 dsh 服务拉起执行（bundle 只在 harness 启动时装载，装晚了当次启动读到旧插件——实测踩中）
+- **应用自更新改用 GitHub API 资产 digest 校验**：独立 `.sha256` 资产契约退役（发布侧从未上传过该文件，fail-closed 致壳内应用更新自 v1.3.0 起从未真正成功——实锤修正）；此后 Release 只需上传 `dsh-app.exe` 一个资产
 
 ## v1.7.0（2026-09-04）
 

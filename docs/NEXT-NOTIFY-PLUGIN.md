@@ -1,6 +1,6 @@
 # 方向文件：会话完成提醒 v2（harness 插件方案）
 
-> **状态：已实施并随 v1.7.1 发布（2026-09-08）**。插件包 `scripts/dsh-notify/` v0.1.2（内嵌资源，含 cordis.patch.yml；0.1.1 的 minBusySeconds 去抖经 Four 拍板删除）+ 壳安装器 `Server/NotifyPluginInstaller.cs`（先于服务拉起执行）；v1（CompletionNotifier）整体删除。首轮 0.1.0 缺 `dsh.bundle.patch` 致 harness 启动 exit 1（见下「安装」节第 0 件），已修；真机验收通过（主服务实测完成弹窗，Four 肉眼确认）。下文留档为设计依据。
+> **状态：已实施并随 v1.7.1 发布（2026-09-06）**。插件包 `scripts/dsh-notify/` v0.1.2（内嵌资源，含 cordis.patch.yml；0.1.1 的 minBusySeconds 去抖经 Four 拍板删除）+ 壳安装器 `Server/NotifyPluginInstaller.cs`（先于服务拉起执行）；v1（CompletionNotifier）整体删除。首轮 0.1.0 缺 `dsh.bundle.patch` 致 harness 启动 exit 1（见下「安装」节第 0 件），已修；真机验收通过（主服务实测完成弹窗，Four 肉眼确认）。下文留档为设计依据。
 >
 > 写给 compact 后的新会话。本文件是已拍板方向、尚未实施的功能档案，含全部必要背景与技术锚点。
 > 创建于 2026-09-06，当时环境：harness 0.1.2-rc.1（`node bin.js web --no-open`，dsh-app 壳拉起），GUI 127.0.0.1:3080。
@@ -54,7 +54,7 @@ exports.apply = function (ctx) {
 
 **安装（壳侧首启，幂等）**：bundle 挂载链**四要件**（原记"三处一体"系旧时代经验，首轮实施被加载器打脸后补正）：
 
-0. **插件自身 package.json 必须有 `dsh.bundle.patch` 声明**，指向包内 cordis.patch.yml 补丁文件——bundle 靠补丁挂载而非 main 入口直载；缺此项 harness 启动抛 `declares no dsh.bundle in its package.json` **exit 1**（dsh-app-boot/lib/index.js:861 硬校验，2026-09-08 实测踩中致 dsh 三连退；cordis.patch.yml 格式照抄 remote-web-ui：`- insert: [{id, name}]` 一行挂载）
+0. **插件自身 package.json 必须有 `dsh.bundle.patch` 声明**，指向包内 cordis.patch.yml 补丁文件——bundle 靠补丁挂载而非 main 入口直载；缺此项 harness 启动抛 `declares no dsh.bundle in its package.json` **exit 1**（dsh-app-boot/lib/index.js:861 硬校验，2026-09-06 实测踩中致 dsh 三连退；cordis.patch.yml 格式照抄 remote-web-ui：`- insert: [{id, name}]` 一行挂载）
 1. 插件包本体 → `~/.dsh/profiles/web/node_modules/dsh-notify/`（壳内嵌资源写出，版本不一致或关键文件残缺才覆写）
 2. profile `package.json`：`dependencies` + `dsh.profile.bundles` 各加一行（参照 remote-web-ui 的手动加法，本次已有成功经验）
 3. 写完后**需重启 harness 生效**——下次自然重启或随发布流程；不主动断服务
@@ -65,7 +65,7 @@ exports.apply = function (ctx) {
 
 ## 验收要点
 
-- 任意任务（含秒回）完成即弹 Toast——已于 2026-09-08 在主 3080 服务实测通过（Four 肉眼确认本对话完成提醒弹出）
+- 任意任务（含秒回）完成即弹 Toast——已于 2026-09-06 在主 3080 服务实测通过（Four 肉眼确认本对话完成提醒弹出）
 - 壳最小化到托盘 / GUI 关闭场景下仍弹（插件在 harness 进程内，与壳存亡无关）
 - 卸载路径：四要件同删（node_modules 目录 + package.json 两行，包内声明随包同灭），不留解析残骸
 

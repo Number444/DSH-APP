@@ -35,8 +35,9 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
               CheckAsync()：GET api.github.com/.../releases/latest
               （直连 → 失败且 7890 可达 → 代理重试一次；60s 超时）
                         │
-          tag 正则 ^v\d+\.\d+\.\d+$ + asset dsh-app.exe/.sha256 必须齐全
-          （发布不完整 = fail-closed 检查失败，不误报）
+          tag 正则 ^v\d+\.\d+\.\d+$ + asset dsh-app.exe 必须存在；
+          校验锚取 API 资产自带 digest 字段（"sha256:<64hex>"，GitHub 自动计算）
+          （缺失/非法 = fail-closed 检查失败，不误报）
                         │
             ┌───────────┴───────────┐
             ▼                       ▼
@@ -51,7 +52,7 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
             │
             ▼
      流式下载 .part（128KB 块 + IncrementalHash 同遍 SHA256，15min 超时）
-     → 下载 .sha256（严格 64 位 hex）→ 比对 → 通过才 .part → .new
+     → 与检查时取到的 API 资产 digest 严格比对 → 通过才 .part → .new
      （磁盘预检 ≥600MB；失败/取消即删 .part）
             │
      窗口可见？──否──→ 托盘气泡"已下载完成，恢复窗口后安装" + _appUpdateReady
@@ -77,8 +78,8 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
 
 | 成员 | 说明 |
 |---|---|
-| `CheckAsync()` | releases/latest 检查（60s 超时；404=无 Release 视为成功无更新；tag 正则 + 双 asset 校验 fail-closed）；`HasUpdate = SemVer.Compare(version, LocalVersion) > 0` |
-| `DownloadAndVerifyAsync(progress, ct)` | 磁盘预检 → 流式下载 .part（同遍 SHA256）→ .sha256 严格解析比对 → .part→.new；失败/取消删 .part |
+| `CheckAsync()` | releases/latest 检查（60s 超时；404=无 Release 视为成功无更新；tag 正则 + exe 资产 + digest 校验 fail-closed）；`HasUpdate = SemVer.Compare(version, LocalVersion) > 0` |
+| `DownloadAndVerifyAsync(progress, ct)` | 磁盘预检 → 流式下载 .part（同遍 SHA256）→ 与 API 资产 digest 严格比对 → .part→.new；失败/取消删 .part |
 | `WriteUpdateScript(port)` | 提取内嵌模板 `dsh_app.Scripts.apply-update.ps1`（与仓库 `scripts/apply-update.ps1` 同源），参数注入写盘（**UTF-8 带 BOM**：PS5.1 无 BOM 按 ANSI 解析中文会语法错误，实测踩坑） |
 | 属性 | `LocalVersion`/`LatestVersion`/`HasUpdate`/`LastCheckSucceeded`/`LastError`/`DownloadedNewExePath` |
 | 网络 | 共享 HttpClient（连接池，Timeout 不设，per-call CTS）；代理重试走单独 handler（WebProxy 127.0.0.1:7890） |
@@ -113,8 +114,8 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
 |---|---|
 | tag 非法 | 检查失败（不误报更新） |
 | Release 版本 ≤ 本地 | "已是最新"（**不校验资产**——旧 Release 无资产不得误报"发布不完整"，实测修正项） |
-| 有新版但 asset 缺失 | 检查失败（不误报更新）；"发布不完整"提示 |
-| .sha256 非法 / 哈希不匹配 | 拒绝安装，删 .part |
+| 有新版但 exe 资产缺失 | 检查失败（不误报更新）；"发布不完整"提示 |
+| exe 资产缺有效 digest / 哈希不匹配 | 检查失败 / 拒绝安装删 .part |
 | 磁盘不足（<600MB） | 快速失败不下载 |
 | 下载超时（15min）/ 取消 | 删 .part；服务不受影响 |
 | 新 exe 启动即崩 | 45s 验证失败 → 自动回滚 + 标记文件 + 下次启动说明弹窗 |
@@ -128,9 +129,11 @@ dsh-app 是单 exe 发布（self-contained 单文件，约 148MB），旧版升�
 
 自动创建脚本（scripts/create-release.ps1）已删除（v1.3.1 起；gh CLI 登录不可用）。每次发版后由主人手动发布（艾薇提供材料），要点：
 
-1. 生成 `dsh-app.exe.sha256`：**裸 64 位 hex**（`Get-FileHash` 输出 .Hash.ToLower()，无文件名——契约两处钉死：`AppUpdater.Sha256Regex` / 本文档）
+1. 资产**只需 `dsh-app.exe` 一个**——校验锚是 API 资产自带的 `digest` 字段（`sha256:<64hex>`，GitHub 上传时自动计算，壳侧 `AppUpdater.Sha256Regex` 解析）
 2. tag 必须 `v<版本>`（壳侧正则 `^v\d+\.\d+\.\d+$` 校验）
-3. 两条资产缺一即"发布不完整"（壳侧 fail-closed 不误报）
+3. 缺 exe 资产即"发布不完整"（壳侧 fail-closed 不误报）
+
+> 历史注记：旧契约要求随附独立 `.sha256` 校验文件（裸 64 hex）——**发布侧从未实际上传过**，fail-closed 导致壳内应用更新自 v1.3.0 起从未真正成功（2026-09-06 对质实锤，历次"更新成功"实为 Harness 更新或发布脚本铺 exe）；v1.7.1 起改用 API digest，该文件退役。
 4. notes 取 `docs/CHANGELOG.md` 最新节；网页 Draft 或 `gh release create` 均可
 
 ## 7. 版本号

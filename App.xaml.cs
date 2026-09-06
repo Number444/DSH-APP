@@ -75,7 +75,7 @@ public partial class App : Application
         Directory.CreateDirectory(logDir);
         _logFilePath = Path.Combine(logDir, "app.log");
 
-        // 清理上次自更新残留的下载文件（*.part / *.new / *.sha256）。
+        // 清理上次自更新残留的下载文件（*.part / *.new；*.sha256 是旧契约时代的残留，保留清扫）。
         // 不碰 backup/ 与 rolled-back.flag/updater.log——备份与回滚职责全归更新器脚本，
         // 防"新实例清理删掉备份致回滚失效"竞态（架构评审项）。
         try

@@ -59,18 +59,13 @@ git push origin main
 
 ### 手动发布指引（主人执行 / 艾薇提供材料）
 
-1. **生成 .sha256**（裸 64 位 hex，无文件名——契约两处钉死：`AppUpdater.Sha256Regex` / `docs/SELF-UPDATE.md`）：
+1. **创建 Release**（tag 必须 `v<版本>`，正则 `^v\d+\.\d+\.\d+$`）：
+   - 网页 Draft：tag `v<版本>` + 上传 `dsh-app.exe`（**只需这一个资产**——校验锚是 GitHub 自动计算的资产 `digest`，壳侧直接读 API 字段）+ notes 取 `docs/CHANGELOG.md` 最新节
+   - 或命令：`gh release create v<版本> <publish>\dsh-app.exe --repo Number444/DSH-APP --title "dsh-app v<版本>" --notes "<CHANGELOG 最新节>"`
 
-   ```powershell
-   $h = (Get-FileHash -Algorithm SHA256 "bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe").Hash.ToLower()
-   Set-Content -Encoding ascii -NoNewline -Path "bin\Release\net9.0-windows\win-x64\publish\dsh-app.exe.sha256" -Value $h
-   ```
+**说明**：缺 exe 资产时壳侧 fail-closed 不误报。Release 创建失败不阻塞已交付的窗口，但下次检查更新会不可用——发布后请补建。
 
-2. **创建 Release**（tag 必须 `v<版本>`，正则 `^v\d+\.\d+\.\d+$`；两条资产缺一即"发布不完整"）：
-   - 网页 Draft：tag `v1.3.1` + 上传 `dsh-app.exe` 与 `dsh-app.exe.sha256` + notes 取 `docs/CHANGELOG.md` 最新节
-   - 或命令：`gh release create v<版本> <publish>\dsh-app.exe <publish>\dsh-app.exe.sha256 --repo Number444/DSH-APP --title "dsh-app v<版本>" --notes "<CHANGELOG 最新节>"`
-
-**说明**：发布不完整（缺 asset）时壳侧 fail-closed 不误报。Release 创建失败不阻塞已交付的窗口，但下次检查更新会不可用——发布后请补建。
+> 历史注记：v1.3.0~v1.7.0 的旧契约要求随附 `.sha256` 校验文件——发布侧从未上传过，壳内应用更新因此从未真正成功（fail-closed，2026-09-06 实锤）；v1.7.1 起退役，改用 API 资产 digest。**过渡期例外**：若需让 ≤v1.7.0 的旧壳壳内升级到新版，该版 Release 仍需补传旧格式的 `dsh-app.exe.sha256`（裸 64 hex）。
 
 ## 部署到另一台电脑
 
