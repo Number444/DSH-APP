@@ -1,6 +1,6 @@
 # dsh-app — DeepSeek Harness 桌面壳
 
-> v1.7.0(2026-09-04)
+> v1.7.1(2026-09-08)
 
 把 DeepSeek Harness Web GUI 封装成独立 Windows 桌面应用(WPF + WebView2,纯壳零侵入)。
 

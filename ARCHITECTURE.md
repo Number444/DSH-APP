@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-09-04 · 版本 v1.7.0 · 本次更新:适配 harness v0.1.2-alpha.1 launch token 鉴权（壳抓 stdout 取带 token URL，WebSocket 事件流经 HttpClient cookie 交换握手）；归档"远程接管外部 dsh"与"退出APP（保留服务）"菜单项；设置页隐藏 LAN Share 入口（待 token 适配）；会话完成通知暂时禁用（事件流迁移 /api/remote.mux 多路复用协议，待重写）
+> 更新时间:2026-09-08 · 版本 v1.7.1 · 本次更新:会话完成通知 v2 落地（harness 进程内 dsh-notify 插件接替被禁用/删除的 v1）——壳首启按四要件幂等安装、先于服务拉起；设置页开关恢复可见并即时生效；无去抖秒回也通知
 
 ## 1. 架构定位:纯壳(Wrapper)
 

@@ -1,6 +1,6 @@
 # 方向文件：会话完成提醒 v2（harness 插件方案）
 
-> **状态：已实施（2026-09-08，基线 v1.7.0）**。插件包 `scripts/dsh-notify/` v0.1.1（内嵌资源，含 cordis.patch.yml）+ 壳安装器 `Server/NotifyPluginInstaller.cs`；v1（CompletionNotifier）整体删除。首轮 0.1.0 缺 `dsh.bundle.patch` 致 harness 启动 exit 1（见下「安装」节第 0 件），已修并经测试 profile 端到端验证装载成功；真机验收以主服务重启后的完成弹窗为准。下文留档为设计依据。
+> **状态：已实施并随 v1.7.1 发布（2026-09-08）**。插件包 `scripts/dsh-notify/` v0.1.2（内嵌资源，含 cordis.patch.yml；0.1.1 的 minBusySeconds 去抖经 Four 拍板删除）+ 壳安装器 `Server/NotifyPluginInstaller.cs`（先于服务拉起执行）；v1（CompletionNotifier）整体删除。首轮 0.1.0 缺 `dsh.bundle.patch` 致 harness 启动 exit 1（见下「安装」节第 0 件），已修；真机验收通过（主服务实测完成弹窗，Four 肉眼确认）。下文留档为设计依据。
 >
 > 写给 compact 后的新会话。本文件是已拍板方向、尚未实施的功能档案，含全部必要背景与技术锚点。
 > 创建于 2026-09-06，当时环境：harness 0.1.2-rc.1（`node bin.js web --no-open`，dsh-app 壳拉起），GUI 127.0.0.1:3080。
