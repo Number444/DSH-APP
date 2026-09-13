@@ -38,6 +38,7 @@ public partial class MainWindow
         if (MenuPopup.IsOpen) { AnimateMenuClose(MenuPopup, TopMenu, true); e.Handled = true; }
         else if (BalanceMenuPopup.IsOpen) { AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true); e.Handled = true; }
         else if (TrayMenuPopup.IsOpen) { AnimateMenuClose(TrayMenuPopup, TrayMenu, true); e.Handled = true; }
+        else if (BrowserMenuPopup.IsOpen) { AnimateMenuClose(BrowserMenuPopup, BrowserMenu, true); e.Handled = true; }
     }
 
     /// <summary>菜单关闭统一入口：animated=true 播关闭动画（打开动画的倒放，完成后置 IsOpen=false），
@@ -51,16 +52,26 @@ public partial class MainWindow
 
     /// <summary>Popup → 面板映射（外部点击钩子遍历用）。</summary>
     private AppMenuPanel PanelOf(Popup popup) =>
-        popup == MenuPopup ? TopMenu : popup == BalanceMenuPopup ? BalanceMenu : TrayMenu;
+        popup == MenuPopup ? TopMenu
+        : popup == BalanceMenuPopup ? BalanceMenu
+        : popup == BrowserMenuPopup ? BrowserMenu
+        : TrayMenu;
 
-    /// <summary>公共菜单项路由：顶栏（TopMenu）、托盘（TrayMenu）、余额（BalanceMenu）共用。</summary>
+    /// <summary>公共菜单项路由：顶栏（TopMenu）、托盘（TrayMenu）、余额（BalanceMenu）、浏览器（BrowserMenu）共用。</summary>
     private async void OnTopMenuClicked(string tag)
     {
         AnimateMenuClose(MenuPopup, TopMenu, true);
         AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true);
         AnimateMenuClose(TrayMenuPopup, TrayMenu, true);
+        AnimateMenuClose(BrowserMenuPopup, BrowserMenu, true);
         switch (tag)
         {
+            case "copylink":
+                CopyAccessLink();
+                break;
+            case "openbrowser":
+                OpenHarnessInBrowser();
+                break;
             case "about":
                 new Views.AboutWindow { Owner = this }.ShowDialog();
                 break;
@@ -228,7 +239,7 @@ public partial class MainWindow
     /// <summary>所有菜单与余额状态卡都关闭后卸载钩子（幂等）。</summary>
     private void UninstallDismissHookIfIdle()
     {
-        if (MenuPopup.IsOpen || BalanceMenuPopup.IsOpen || TrayMenuPopup.IsOpen || BalanceStatusPopup.IsOpen) return;
+        if (MenuPopup.IsOpen || BalanceMenuPopup.IsOpen || TrayMenuPopup.IsOpen || BrowserMenuPopup.IsOpen || BalanceStatusPopup.IsOpen) return;
         if (_mouseHook == IntPtr.Zero) return;
         UnhookWindowsHookEx(_mouseHook);
         _mouseHook = IntPtr.Zero;
@@ -256,7 +267,7 @@ public partial class MainWindow
                         try
                         {
                             // 局部数组：钩子回调高频触发，避免共享静态数组（虽 UI 线程串行无竞态，局部更干净）
-                            foreach (var popup in new[] { MenuPopup, BalanceMenuPopup, TrayMenuPopup })
+                            foreach (var popup in new[] { MenuPopup, BalanceMenuPopup, TrayMenuPopup, BrowserMenuPopup })
                             {
                                 if (!popup.IsOpen) continue;
                                 if (IsAnchorHit(popup, pt)) continue; // 锚点命中：交给按钮 toggle
@@ -312,6 +323,8 @@ public partial class MainWindow
                 return IsPointInElementScreenRect(TitleBtnMenu, physPt);
             if (popup == BalanceMenuPopup)
                 return IsPointInElementScreenRect(TitleBalance, physPt);
+            if (popup == BrowserMenuPopup)
+                return IsPointInElementScreenRect(TitleBtnBrowser, physPt);
             if (popup == TrayMenuPopup)
                 // 48 物理像素：高 DPI（200%+）下托盘图标本体可达 32px+，32 阈值会把图标边缘点击误判为外部点击
                 return _trayIconScreenPos is Point p &&

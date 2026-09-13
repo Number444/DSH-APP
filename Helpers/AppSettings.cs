@@ -34,6 +34,9 @@ public sealed class AppSettings
     /// <summary>关闭窗口时最小化到托盘（服务继续运行；默认开）。关 = 关窗即退出（v1.1 行为）。</summary>
     public bool MinimizeToTrayOnClose { get; set; } = true;
 
+    /// <summary>缩回托盘时弹出系统气泡通知（默认开；关闭则静默驻留）。</summary>
+    public bool TrayMinimizeNotify { get; set; } = true;
+
     /// <summary>会话完成时弹出系统通知（默认开；壳直连服务事件流检测，托盘化/页面挂起期间照常生效）。</summary>
     public bool SessionCompletionNotify { get; set; } = true;
 

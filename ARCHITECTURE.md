@@ -1,7 +1,7 @@
 # dsh-app 架构文档
 
 > 本文档描述 dsh-app 的整体架构、调用链路与关键设计决策。
-> 更新时间:2026-09-06 · 版本 v1.7.1 · 本次更新:会话完成通知 v2 落地（harness 进程内 dsh-notify 插件接替被禁用/删除的 v1）——壳首启按四要件幂等安装、先于服务拉起；设置页开关恢复可见并即时生效；无去抖秒回也通知
+> 更新时间:2026-09-13 · 版本 v1.7.2 · 本次更新:顶栏「浏览器」按钮改为下拉菜单（复制链接带 token / 在浏览器中打开，主菜单同款 Popup 全套接入）；设置新增「缩回托盘时弹出通知提示」开关（每次托盘化提示，取代仅首次）
 
 ## 1. 架构定位:纯壳(Wrapper)
 
@@ -46,7 +46,7 @@ dsh-app 是 DeepSeek Harness Web GUI 的**桌面壳**,不包含任何 Harness �
 | 模块 | 文件 | 职责 |
 |---|---|---|
 | App 层 | `App.xaml(.cs)` | 入口、单实例 Mutex、全局异常兜底、`ActiveServer` 托管、主题初始化、`App.AppVersion`（壳版本）、启动清理 update 下载残留、**日志截断（`FileLog.TrimIfOversize`，单实例判定后执行）**、**缓存清理执行（`WebView2CacheCleaner.RunPendingCleanup`，WebView2 初始化前）** |
-| 窗口层 | `MainWindow.xaml(.cs)` + **8 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱、`.Notify` 完成通知插件安装/开关同步+气泡点击路由、`.LanShare` 局域网共享接线） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出APP（保留服务）/退出）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
+| 窗口层 | `MainWindow.xaml(.cs)` + **8 个 partial**（v1.4.0 拆分 5 个：`.Tray` 托盘 / `.Menus` 菜单+外部关闭钩子 / `.Updates` 双更新状态机 / `.Balance` 余额 / `.Native` DWM+P/Invoke+窗口记忆+StepRow；后续新增 `.Progress` 像素点阵进度条+彗尾光柱、`.Notify` 完成通知插件安装/开关同步+气泡点击路由、`.LanShare` 局域网共享接线） | 自绘顶栏（4 工具按钮）、WebView2 渲染、覆盖层状态机、心跳、窗口记忆、菜单（日志/诊断信息/检查 Harness 更新/检查应用更新/设置/关于/退出；顶栏「浏览器」按钮带下拉菜单：复制链接带 token / 在浏览器中打开）、**启动页入场动画（品牌区/进度卡片抛出回弹编排）**、**顶栏余额显示（点击动效 + 刷新状态卡）**、最大化钳制（WM_GETMINMAXINFO） |
 | 服务层 | `Server/ServerController.cs` | 并发端口探测、接管身份验证、进程拉起、就绪轮询、退出清理、`IsManaged`（更新前置） |
 | 共享层 | `Server/LanShareProxy.cs` | 局域网共享代理：Kestrel 绑 `0.0.0.0:3081` + YARP 反代到 `127.0.0.1:{服务端口}`；token 门禁（`?key=` 首验种 Cookie，常量时间比较）；Host+Origin 重写过 harness trust 围栏；特权写操作 LAN 侧 403（settings/credentials 写、agentPreset 写、host 原生动作、llm.discoverModels）；`crypto.randomUUID` polyfill 注入 HTML（非安全上下文补救）；HTTP/SSE/WebSocket 全透传；启停随设置开关与服务重启重同步，壳退出限时 2s 停服 |
 | 更新层 | `Server/HarnessUpdater.cs` | Harness（npm 包）版本检查（npm view）与更新（npm install），semver 比较（共用 `Helpers/SemVer.cs`），超时兜底，装后版本验证，`LastError` 透出，更新中关窗拦截确认（`AbortRunningNpm`） |

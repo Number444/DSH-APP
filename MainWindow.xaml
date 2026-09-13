@@ -155,6 +155,17 @@
                 <views:AppMenuPanel x:Name="TrayMenu" />
             </Popup>
 
+            <!-- 浏览器按钮菜单：复制链接（带 token）/ 在浏览器中打开（与主菜单同款 Popup + 动画） -->
+            <Popup x:Name="BrowserMenuPopup"
+                   Placement="Bottom"
+                   PlacementTarget="{Binding ElementName=TitleBtnBrowser}"
+                   AllowsTransparency="True"
+                   StaysOpen="True"
+                   HorizontalOffset="-40"
+                   VerticalOffset="-40">
+                <views:AppMenuPanel x:Name="BrowserMenu" />
+            </Popup>
+
             <!-- 系统按钮 -->
             <StackPanel Grid.Column="3"
                         Orientation="Horizontal">

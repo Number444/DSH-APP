@@ -1,5 +1,10 @@
 # 变更记录
 
+## v1.7.2（2026-09-13）
+
+- 顶栏「浏览器」按钮改为下拉菜单（与主菜单同款 Popup + 动画，Esc/外部点击/钩子全套接入）：「复制链接（带 token）」一键复制当前访问地址到剪贴板、「在浏览器中打开」保留原直开行为
+- 设置页「常驻」区新增「缩回托盘时弹出通知提示」开关（默认开）：每次最小化到托盘都弹气泡提示，关闭则静默驻留——取代原"仅首次提示"的一次性逻辑
+
 ## v1.7.1（2026-09-06）
 
 - **会话完成通知 v2（harness 插件方案，接替 v1.7.0 的禁用态）**：壳首启幂等安装 `dsh-notify` 插件到 harness profile——挂载链四要件：包本体（按版本覆写）+ `dependencies` 版本钉 + `dsh.profile.bundles` 登记 + **插件 package.json 的 `dsh.bundle.patch` 声明与 cordis.patch.yml 补丁文件**（缺第四件 harness 启动即 exit 1，首轮实测踩中）；插件在 harness 进程内订阅官方事件 `api-session/status` 检测 running→idle 边沿即弹 Windows Toast（无去抖，秒回也通知——Four 拍板删除 0.1.1 的 minBusySeconds）——窗口托盘化/页面挂起期间照常通知（通知源在 harness 进程内，与页面存亡无关）

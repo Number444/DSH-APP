@@ -221,8 +221,8 @@
 | 渲染进程崩溃 | `ProcessFailed(RenderProcessExited/Unresponsive)` → 自动 `Reload()` 一次，再崩溃 → 错误区 + 重试 |
 | 重试 / 顶栏重启服务 | **先 `WebView.Visibility = Collapsed`（R1：覆盖层盖不住 HWND）** → `ShowLoading()`（重置步骤）→ `Shutdown()` → 重新 `EnsureServerAsync()` → `Navigate` |
 | 顶栏刷新 | `CoreWebView2.Reload()`（页面卡死时用） |
-| 顶栏浏览器打开 | `Process.Start(url, UseShellExecute=true)`——用户原有的浏览器工作流后路 |
-| 关窗（默认） | **最小化到托盘**：`OnClosing` 中 `e.Cancel + Hide()`（服务继续运行，页面渲染挂起——见 §4.5）；首次隐藏弹托盘气泡提示；设置 `MinimizeToTrayOnClose=false` 恢复关窗即退 |
+| 顶栏浏览器按钮 | 下拉菜单（同款 Popup 菜单）：复制链接（带 token，`Clipboard.SetText`）/ 在浏览器中打开（`Process.Start(url, UseShellExecute=true)`）——用户原有的浏览器工作流后路 |
+| 关窗（默认） | **最小化到托盘**：`OnClosing` 中 `e.Cancel + Hide()`（服务继续运行，页面渲染挂起——见 §4.5）；缩回时弹托盘气泡提示（设置 `TrayMinimizeNotify=false` 关闭则静默驻留）；设置 `MinimizeToTrayOnClose=false` 恢复关窗即退 |
 | 托盘退出 | 托盘菜单"退出"置 `_trayExitRequested=true` 再 `Close()` 放行；更新中断确认（`_abortUpdateConfirmed`）同样放行——两者都必须排除在托盘拦截之外 |
 | 托盘化后清理 | `ServerController.Shutdown()`：清理**自己拉起的**进程；**接管的外部服务经身份验证（进程命令行含 dsh/bin.js 特征）确认是 dsh 后一并停止**（防"关不掉"残留），非 dsh 程序绝不误杀 |
 

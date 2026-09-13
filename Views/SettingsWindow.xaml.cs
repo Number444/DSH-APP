@@ -48,6 +48,7 @@ public partial class SettingsWindow : Window
         ChkAutoCheckAppUpdate.IsChecked = AppSettings.Current.AutoCheckAppUpdate;
         ChkShowBalance.IsChecked = AppSettings.Current.ShowBalance;
         ChkTrayClose.IsChecked = AppSettings.Current.MinimizeToTrayOnClose;
+        ChkTrayNotify.IsChecked = AppSettings.Current.TrayMinimizeNotify;
         ChkSessionNotify.IsChecked = AppSettings.Current.SessionCompletionNotify;
         ChkLanShare.IsChecked = AppSettings.Current.LanShareEnabled;
         LanPortBox.Text = AppSettings.Current.LanSharePort.ToString();
@@ -115,6 +116,12 @@ public partial class SettingsWindow : Window
     private void OnTrayCloseChanged(object sender, RoutedEventArgs e)
     {
         AppSettings.Current.MinimizeToTrayOnClose = ChkTrayClose.IsChecked == true;
+        AppSettings.Current.Save();
+    }
+
+    private void OnTrayNotifyChanged(object sender, RoutedEventArgs e)
+    {
+        AppSettings.Current.TrayMinimizeNotify = ChkTrayNotify.IsChecked == true;
         AppSettings.Current.Save();
     }
 

@@ -55,8 +55,6 @@ public partial class MainWindow : Window
     private Views.UpdateProgressWindow? _checkProgress;
     /// <summary>托盘"退出"请求：跳过最小化到托盘拦截，真正退出。</summary>
     private bool _trayExitRequested;
-    /// <summary>首次隐藏到托盘时是否已提示。</summary>
-    private bool _trayHintShown;
     /// <summary>余额是否高于告警阈值（初始视为高：首次刷新低于阈值即告警；恢复后复位）。</summary>
     private bool _wasAboveThreshold = true;
     /// <summary>余额状态色阈值（固定）：低于此值变黄（告警）。</summary>
@@ -127,14 +125,23 @@ public partial class MainWindow : Window
         // 托盘菜单：与 APP 内菜单同一公共控件（Popup 定位，弃用 ContextMenu）；内容由 UpdateMenuItems 联动
         TrayMenu.ItemClicked += OnTopMenuClicked;
 
+        // 浏览器菜单：复制链接（带 token）/ 在浏览器中打开（静态两项，同一公共菜单控件）
+        BrowserMenu.ItemClicked += OnTopMenuClicked;
+        BrowserMenu.ItemsSource = new[]
+        {
+            new AppMenuItem("copylink", "复制链接（带 token）"),
+            new AppMenuItem("openbrowser", "在浏览器中打开"),
+        };
+
         // 菜单键盘可达：焦点在 Popup 内时 Esc 经面板 DismissRequested 关闭（Popup 独立 HWND，
         // 窗口级 PreviewKeyDown 收不到）；焦点在主窗口时走 OnWindowPreviewKeyDown 兜底
         TopMenu.DismissRequested += () => AnimateMenuClose(MenuPopup, TopMenu, true);
         BalanceMenu.DismissRequested += () => AnimateMenuClose(BalanceMenuPopup, BalanceMenu, true);
         TrayMenu.DismissRequested += () => AnimateMenuClose(TrayMenuPopup, TrayMenu, true);
+        BrowserMenu.DismissRequested += () => AnimateMenuClose(BrowserMenuPopup, BrowserMenu, true);
         PreviewKeyDown += OnWindowPreviewKeyDown;
 
-        // 菜单"点击外部关闭"：三个 Popup 全部接入（打开时装钩子，关闭时自动卸载）
+        // 菜单"点击外部关闭"：四个 Popup 全部接入（打开时装钩子，关闭时自动卸载）
         // 打开动画经 Opened 统一驱动：顶栏/余额从按钮上方抛出（(0,-24)），托盘按光标方向
         MenuPopup.Opened += (_, _) => { InstallDismissHook(); TopMenu.PlayOpenAnimation(new Point(0, -24)); TopMenu.FocusFirstItem(); };
         MenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
@@ -142,6 +149,8 @@ public partial class MainWindow : Window
         BalanceMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
         TrayMenuPopup.Opened += (_, _) => { InstallDismissHook(); TrayMenu.PlayOpenAnimation(_trayFlyFrom); TrayMenu.FocusFirstItem(); };
         TrayMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
+        BrowserMenuPopup.Opened += (_, _) => { InstallDismissHook(); BrowserMenu.PlayOpenAnimation(new Point(0, -24)); BrowserMenu.FocusFirstItem(); };
+        BrowserMenuPopup.Closed += (_, _) => UninstallDismissHookIfIdle();
         // 余额状态卡：轻量档打开动画（淡入 + 轻放大，无位移无弹性）；StaysOpen=True，
         // 点击外部经全局钩子动画淡出（与菜单同一钩子），关闭后按空闲卸载钩子
         BalanceStatusPopup.Opened += (_, _) =>
@@ -676,17 +685,44 @@ public partial class MainWindow : Window
             WebView.CoreWebView2.Reload();
     }
 
+    /// <summary>顶栏"浏览器"按钮：弹出菜单（复制链接带 token / 在浏览器中打开）；再点关闭。</summary>
     private void TitleBtnBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        if (BrowserMenuPopup.IsOpen)
+        {
+            AnimateMenuClose(BrowserMenuPopup, BrowserMenu, true);
+            return;
+        }
+        BrowserMenuPopup.IsOpen = true;
+    }
+
+    /// <summary>带一次性 token 的当前访问地址：harness v0.1.2-alpha.1 起裸 URL 会被 401 拒绝，兜底裸地址。</summary>
+    private string CurrentAccessUrl => _server.AuthenticatedUrl ?? $"http://127.0.0.1:{_server.Port}";
+
+    /// <summary>在默认浏览器打开 Harness（带 token；浏览器菜单"在浏览器中打开"）。</summary>
+    private void OpenHarnessInBrowser()
     {
         try
         {
-            // 带一次性 token 的 URL：harness v0.1.2-alpha.1 起裸 URL 会被 401 拒绝
-            var url = _server.AuthenticatedUrl ?? $"http://127.0.0.1:{_server.Port}";
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(CurrentAccessUrl) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
             AppendLog($"打开浏览器失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>复制带 token 的访问链接到剪贴板（浏览器菜单"复制链接"）。</summary>
+    private void CopyAccessLink()
+    {
+        try
+        {
+            Clipboard.SetText(CurrentAccessUrl);
+            AppendLog("访问链接已复制到剪贴板（含 token）");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"复制链接失败: {ex.Message}");
         }
     }
 
@@ -854,9 +890,9 @@ public partial class MainWindow : Window
             CloseAllMenus(); // Popup 是独立 HWND：不关则残留屏幕，钩子也保持常驻
             Hide();
             TrySetWebViewSuspended(true); // 挂起渲染进程，托盘驻留不空转（页面活动可拒绝，尽力而为）
-            if (!_trayHintShown)
+            // 缩回托盘通知：由设置开关控制，每次托盘化都提示（关闭则静默驻留）
+            if (AppSettings.Current.TrayMinimizeNotify)
             {
-                _trayHintShown = true;
                 try
                 {
                     TrayIcon.ShowBalloonTip("DeepSeek Harness",
@@ -888,6 +924,7 @@ public partial class MainWindow : Window
         AnimateMenuClose(MenuPopup, TopMenu, false);
         AnimateMenuClose(BalanceMenuPopup, BalanceMenu, false);
         AnimateMenuClose(TrayMenuPopup, TrayMenu, false);
+        AnimateMenuClose(BrowserMenuPopup, BrowserMenu, false);
         BalanceStatusPopup.IsOpen = false;
         UninstallDismissHookIfIdle();
     }
